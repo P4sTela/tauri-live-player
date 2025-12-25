@@ -3,6 +3,57 @@ use tauri::State;
 use crate::state::AppState;
 use crate::types::*;
 
+/// テスト用: 単一のビデオファイルを直接再生
+#[tauri::command]
+pub async fn play_test_video(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let mut player_guard = state.player.lock();
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "Player not initialized".to_string())?;
+
+    // テスト用のCueを作成
+    let test_cue = Cue {
+        id: "test".to_string(),
+        name: "Test Video".to_string(),
+        items: vec![MediaItem {
+            id: "test-item".to_string(),
+            name: "Test".to_string(),
+            path: path.clone(),
+            output_id: "display-1".to_string(),
+            media_type: MediaType::Video,
+            offset: None,
+            trim_start: None,
+            trim_end: None,
+        }],
+        duration: 0.0,
+        loop_playback: false,
+        auto_advance: false,
+        color: None,
+    };
+
+    // テスト用の出力を作成
+    let test_output = OutputTarget {
+        id: "display-1".to_string(),
+        name: "Test Display".to_string(),
+        output_type: OutputType::Display,
+        brightness: None,
+        display_index: Some(0),
+        fullscreen: Some(false),
+        ndi_name: None,
+        audio_driver: None,
+        audio_device: None,
+        audio_channels: None,
+    };
+
+    player
+        .load_cue(&test_cue, &[test_output])
+        .map_err(|e| e.to_string())?;
+
+    player.play().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn load_cue(state: State<'_, AppState>, cue_index: usize) -> Result<(), String> {
     let mut player_guard = state.player.lock();

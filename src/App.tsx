@@ -1,50 +1,103 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useEffect } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { useProjectStore } from "./stores/projectStore";
+import { usePlayerStore } from "./stores/playerStore";
+import { useKeyboard } from "./hooks/useKeyboard";
+import { usePlayerSync } from "./hooks/usePlayerSync";
+import { CueList } from "./components/cue/CueList";
+import { PlayerControls } from "./components/player/PlayerControls";
+import { BrightnessPanel } from "./components/player/BrightnessPanel";
+import { Button } from "./components/ui/button";
+import { FileVideo } from "lucide-react";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const { project, newProject } = useProjectStore();
+  const { status, error } = usePlayerStore();
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  // キーボードショートカット
+  useKeyboard();
+
+  // プレイヤー状態同期
+  usePlayerSync();
+
+  // 初期プロジェクト作成
+  useEffect(() => {
+    if (!project) {
+      newProject("New Project");
+    }
+  }, [project, newProject]);
+
+  // テスト用: 動画ファイルを開いて再生
+  const handleOpenVideo = async () => {
+    try {
+      const file = await open({
+        multiple: false,
+        filters: [
+          {
+            name: "Video",
+            extensions: ["mp4", "mov", "avi", "mkv", "webm"],
+          },
+        ],
+      });
+
+      if (file) {
+        console.log("Opening video:", file);
+        await invoke("play_test_video", { path: file });
+      }
+    } catch (e) {
+      console.error("Failed to open video:", e);
+    }
+  };
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <div className="h-screen flex flex-col bg-background text-foreground">
+      {/* Header */}
+      <header className="border-b px-4 py-2 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-semibold">
+            {project?.name || "TauriLivePlayer"}
+          </h1>
+          <Button variant="outline" size="sm" onClick={handleOpenVideo}>
+            <FileVideo className="w-4 h-4 mr-2" />
+            Open Video
+          </Button>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="capitalize">{status}</span>
+          {error && <span className="text-destructive">{error}</span>}
+        </div>
+      </header>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+      {/* Main Content */}
+      <main className="flex-1 flex overflow-hidden">
+        {/* Left Panel - Cue List */}
+        <div className="w-1/2 border-r flex flex-col">
+          <div className="p-2 border-b bg-muted/50">
+            <h2 className="text-sm font-medium">Cue List</h2>
+          </div>
+          <div className="flex-1 overflow-auto">
+            <CueList />
+          </div>
+        </div>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+        {/* Right Panel - Details & Controls */}
+        <div className="w-1/2 flex flex-col">
+          <div className="p-2 border-b bg-muted/50">
+            <h2 className="text-sm font-medium">Brightness</h2>
+          </div>
+          <div className="p-4">
+            <BrightnessPanel />
+          </div>
+        </div>
+      </main>
+
+      {/* Footer - Player Controls */}
+      <footer className="border-t p-4">
+        <PlayerControls />
+      </footer>
+    </div>
   );
 }
 

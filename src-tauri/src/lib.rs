@@ -23,11 +23,14 @@ pub fn run() {
             let state = app.state::<AppState>();
             if let Err(e) = state.init_player() {
                 eprintln!("Failed to initialize GStreamer: {:?}", e);
+            } else {
+                println!("GStreamer initialized successfully");
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             // Player
+            commands::player::play_test_video,
             commands::player::load_cue,
             commands::player::play,
             commands::player::pause,
