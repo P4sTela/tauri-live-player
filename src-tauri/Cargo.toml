@@ -1,16 +1,11 @@
 [package]
 name = "tauri-live-player"
 version = "0.1.0"
-description = "A Tauri App"
+description = "Live event timecode-synced video playback system"
 authors = ["you"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "tauri_live_player_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -18,8 +13,40 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+# Tauri
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+parking_lot = "0.12"
+
+# GStreamer
+gstreamer = "0.23"
+gstreamer-video = "0.23"
+gstreamer-audio = "0.23"
+gstreamer-app = "0.23"
+gstreamer-pbutils = "0.23"
+
+[target.'cfg(windows)'.dependencies]
+# Windows-specific dependencies (if needed)
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS-specific dependencies (if needed)
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
