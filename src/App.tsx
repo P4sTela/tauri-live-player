@@ -1,15 +1,13 @@
 import { useEffect } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "./stores/projectStore";
 import { usePlayerStore } from "./stores/playerStore";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { usePlayerSync } from "./hooks/usePlayerSync";
-import { CueList } from "./components/cue/CueList";
-import { PlayerControls } from "./components/player/PlayerControls";
+import { PlayView } from "./components/views/PlayView";
+import { EditView } from "./components/views/EditView";
 import { BrightnessPanel } from "./components/player/BrightnessPanel";
-import { Button } from "./components/ui/button";
-import { FileVideo } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Play, Settings } from "lucide-react";
 import "./App.css";
 
 function App() {
@@ -29,74 +27,60 @@ function App() {
     }
   }, [project, newProject]);
 
-  // テスト用: 動画ファイルを開いて再生
-  const handleOpenVideo = async () => {
-    try {
-      const file = await open({
-        multiple: false,
-        filters: [
-          {
-            name: "Video",
-            extensions: ["mp4", "mov", "avi", "mkv", "webm"],
-          },
-        ],
-      });
-
-      if (file) {
-        console.log("Opening video:", file);
-        await invoke("play_test_video", { path: file });
-      }
-    } catch (e) {
-      console.error("Failed to open video:", e);
-    }
-  };
-
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="border-b px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-semibold">
-            {project?.name || "TauriLivePlayer"}
-          </h1>
-          <Button variant="outline" size="sm" onClick={handleOpenVideo}>
-            <FileVideo className="w-4 h-4 mr-2" />
-            Open Video
-          </Button>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="capitalize">{status}</span>
-          {error && <span className="text-destructive">{error}</span>}
-        </div>
-      </header>
+      <Tabs defaultValue="play" className="flex flex-col h-full">
+        {/* Header with Tabs */}
+        <header className="border-b px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-lg font-semibold">
+              {project?.name || "TauriLivePlayer"}
+            </h1>
+            <TabsList>
+              <TabsTrigger value="play" className="gap-2">
+                <Play className="w-4 h-4" />
+                Play
+              </TabsTrigger>
+              <TabsTrigger value="edit" className="gap-2">
+                <Settings className="w-4 h-4" />
+                Edit
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <div className="flex items-center gap-4">
+            {/* Brightness (compact) */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Brightness:</span>
+              <BrightnessPanel compact />
+            </div>
+            {/* Status */}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  status === "playing"
+                    ? "bg-green-500"
+                    : status === "paused"
+                      ? "bg-yellow-500"
+                      : status === "error"
+                        ? "bg-red-500"
+                        : "bg-gray-400"
+                }`}
+              />
+              <span className="capitalize">{status}</span>
+              {error && <span className="text-destructive">{error}</span>}
+            </div>
+          </div>
+        </header>
 
-      {/* Main Content */}
-      <main className="flex-1 flex overflow-hidden">
-        {/* Left Panel - Cue List */}
-        <div className="w-1/2 border-r flex flex-col">
-          <div className="p-2 border-b bg-muted/50">
-            <h2 className="text-sm font-medium">Cue List</h2>
-          </div>
-          <div className="flex-1 overflow-auto">
-            <CueList />
-          </div>
-        </div>
+        {/* Main Content */}
+        <TabsContent value="play" className="flex-1 overflow-hidden m-0">
+          <PlayView />
+        </TabsContent>
 
-        {/* Right Panel - Details & Controls */}
-        <div className="w-1/2 flex flex-col">
-          <div className="p-2 border-b bg-muted/50">
-            <h2 className="text-sm font-medium">Brightness</h2>
-          </div>
-          <div className="p-4">
-            <BrightnessPanel />
-          </div>
-        </div>
-      </main>
-
-      {/* Footer - Player Controls */}
-      <footer className="border-t p-4">
-        <PlayerControls />
-      </footer>
+        <TabsContent value="edit" className="flex-1 overflow-hidden m-0">
+          <EditView />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -4,7 +4,11 @@ import { Slider } from "../ui/slider";
 import { Button } from "../ui/button";
 import { invoke } from "@tauri-apps/api/core";
 
-export function BrightnessPanel() {
+interface BrightnessPanelProps {
+  compact?: boolean;
+}
+
+export function BrightnessPanel({ compact = false }: BrightnessPanelProps) {
   const { project, setMasterBrightness, updateOutput } = useProjectStore();
 
   if (!project) {
@@ -25,7 +29,10 @@ export function BrightnessPanel() {
     }
   };
 
-  const toggleLink = async (outputId: string, currentBrightness: number | null | undefined) => {
+  const toggleLink = async (
+    outputId: string,
+    currentBrightness: number | null | undefined,
+  ) => {
     const isLinked = currentBrightness == null;
 
     if (isLinked) {
@@ -33,7 +40,7 @@ export function BrightnessPanel() {
       try {
         await invoke("set_output_brightness", {
           outputId,
-          value: project.masterBrightness
+          value: project.masterBrightness,
         });
         updateOutput(outputId, { brightness: project.masterBrightness });
       } catch (e) {
@@ -52,6 +59,27 @@ export function BrightnessPanel() {
 
   const videoOutputs = project.outputs.filter((o) => o.type !== "audio");
 
+  // Compact mode - just master slider inline
+  if (compact) {
+    return (
+      <div className="flex items-center gap-2">
+        <Sun className="w-4 h-4 text-muted-foreground" />
+        <Slider
+          value={[project.masterBrightness]}
+          min={0}
+          max={100}
+          step={1}
+          onValueChange={handleMasterChange}
+          className="w-24"
+        />
+        <span className="text-sm text-muted-foreground w-8">
+          {Math.round(project.masterBrightness)}%
+        </span>
+      </div>
+    );
+  }
+
+  // Full mode
   return (
     <div className="space-y-4">
       {/* Master Brightness */}

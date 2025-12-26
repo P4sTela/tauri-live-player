@@ -1,6 +1,7 @@
-import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import type { Project, Cue, MediaItem, OutputTarget } from '../types';
+import { create } from "zustand";
+import { subscribeWithSelector } from "zustand/middleware";
+import { invoke } from "@tauri-apps/api/core";
+import type { Project, Cue, MediaItem, OutputTarget } from "../types";
 
 interface ProjectStore {
   project: Project | null;
@@ -21,7 +22,11 @@ interface ProjectStore {
 
   // Item actions
   addItemToCue: (cueId: string, item: MediaItem) => void;
-  updateItem: (cueId: string, itemId: string, updates: Partial<MediaItem>) => void;
+  updateItem: (
+    cueId: string,
+    itemId: string,
+    updates: Partial<MediaItem>,
+  ) => void;
   removeItem: (cueId: string, itemId: string) => void;
 
   // Output actions
@@ -33,173 +38,195 @@ interface ProjectStore {
   setMasterBrightness: (value: number) => void;
 }
 
-export const useProjectStore = create<ProjectStore>((set, get) => ({
-  project: null,
-  isDirty: false,
-  projectPath: null,
-
-  loadProject: async (path) => {
-    const project = await invoke<Project>('load_project', { path });
-    set({ project, isDirty: false, projectPath: path });
-  },
-
-  saveProject: async (path) => {
-    const { project, projectPath } = get();
-    if (!project) return;
-    const savePath = path || projectPath;
-    await invoke('save_project', { path: savePath });
-    set({ isDirty: false, projectPath: savePath || null });
-  },
-
-  newProject: async (name) => {
-    const project = await invoke<Project>('new_project', { name });
-    set({ project, isDirty: false, projectPath: null });
-  },
-
-  setProject: (project) => {
-    set({ project });
-  },
-
-  addCue: (cue) => {
-    set((state) => ({
-      project: state.project
-        ? { ...state.project, cues: [...state.project.cues, cue] }
-        : null,
-      isDirty: true,
-    }));
-  },
-
-  updateCue: (id, updates) => {
-    set((state) => ({
-      project: state.project
-        ? {
-            ...state.project,
-            cues: state.project.cues.map((c) =>
-              c.id === id ? { ...c, ...updates } : c
-            ),
-          }
-        : null,
-      isDirty: true,
-    }));
-  },
-
-  removeCue: (id) => {
-    set((state) => ({
-      project: state.project
-        ? {
-            ...state.project,
-            cues: state.project.cues.filter((c) => c.id !== id),
-          }
-        : null,
-      isDirty: true,
-    }));
-  },
-
-  reorderCues: (fromIndex, toIndex) => {
-    set((state) => {
-      if (!state.project) return state;
-      const cues = [...state.project.cues];
-      const [removed] = cues.splice(fromIndex, 1);
-      cues.splice(toIndex, 0, removed);
-      return {
-        project: { ...state.project, cues },
-        isDirty: true,
-      };
+// Helper to sync project to Rust backend
+const syncToBackend = (project: Project | null) => {
+  if (project) {
+    invoke("update_project", { project }).catch((e) => {
+      console.error("Failed to sync project to backend:", e);
     });
-  },
+  }
+};
 
-  addItemToCue: (cueId, item) => {
-    set((state) => ({
-      project: state.project
-        ? {
-            ...state.project,
-            cues: state.project.cues.map((c) =>
-              c.id === cueId ? { ...c, items: [...c.items, item] } : c
-            ),
-          }
-        : null,
-      isDirty: true,
-    }));
-  },
+export const useProjectStore = create<ProjectStore>()(
+  subscribeWithSelector((set, get) => ({
+    project: null,
+    isDirty: false,
+    projectPath: null,
 
-  updateItem: (cueId, itemId, updates) => {
-    set((state) => ({
-      project: state.project
-        ? {
-            ...state.project,
-            cues: state.project.cues.map((c) =>
-              c.id === cueId
-                ? {
-                    ...c,
-                    items: c.items.map((i) =>
-                      i.id === itemId ? { ...i, ...updates } : i
-                    ),
-                  }
-                : c
-            ),
-          }
-        : null,
-      isDirty: true,
-    }));
-  },
+    loadProject: async (path) => {
+      const project = await invoke<Project>("load_project", { path });
+      set({ project, isDirty: false, projectPath: path });
+    },
 
-  removeItem: (cueId, itemId) => {
-    set((state) => ({
-      project: state.project
-        ? {
-            ...state.project,
-            cues: state.project.cues.map((c) =>
-              c.id === cueId
-                ? { ...c, items: c.items.filter((i) => i.id !== itemId) }
-                : c
-            ),
-          }
-        : null,
-      isDirty: true,
-    }));
-  },
+    saveProject: async (path) => {
+      const { project, projectPath } = get();
+      if (!project) return;
+      const savePath = path || projectPath;
+      await invoke("save_project", { path: savePath });
+      set({ isDirty: false, projectPath: savePath || null });
+    },
 
-  addOutput: (output) => {
-    set((state) => ({
-      project: state.project
-        ? { ...state.project, outputs: [...state.project.outputs, output] }
-        : null,
-      isDirty: true,
-    }));
-  },
+    newProject: async (name) => {
+      const project = await invoke<Project>("new_project", { name });
+      set({ project, isDirty: false, projectPath: null });
+    },
 
-  updateOutput: (id, updates) => {
-    set((state) => ({
-      project: state.project
-        ? {
-            ...state.project,
-            outputs: state.project.outputs.map((o) =>
-              o.id === id ? { ...o, ...updates } : o
-            ),
-          }
-        : null,
-      isDirty: true,
-    }));
-  },
+    setProject: (project) => {
+      set({ project });
+      syncToBackend(project);
+    },
 
-  removeOutput: (id) => {
-    set((state) => ({
-      project: state.project
-        ? {
-            ...state.project,
-            outputs: state.project.outputs.filter((o) => o.id !== id),
-          }
-        : null,
-      isDirty: true,
-    }));
-  },
+    addCue: (cue) => {
+      set((state) => {
+        const newProject = state.project
+          ? { ...state.project, cues: [...state.project.cues, cue] }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
 
-  setMasterBrightness: (value) => {
-    invoke('set_master_brightness', { value }).catch(console.error);
-    set((state) => ({
-      project: state.project
-        ? { ...state.project, masterBrightness: value }
-        : null,
-    }));
-  },
-}));
+    updateCue: (id, updates) => {
+      set((state) => {
+        const newProject = state.project
+          ? {
+              ...state.project,
+              cues: state.project.cues.map((c) =>
+                c.id === id ? { ...c, ...updates } : c,
+              ),
+            }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    removeCue: (id) => {
+      set((state) => {
+        const newProject = state.project
+          ? {
+              ...state.project,
+              cues: state.project.cues.filter((c) => c.id !== id),
+            }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    reorderCues: (fromIndex, toIndex) => {
+      set((state) => {
+        if (!state.project) return state;
+        const cues = [...state.project.cues];
+        const [removed] = cues.splice(fromIndex, 1);
+        cues.splice(toIndex, 0, removed);
+        const newProject = { ...state.project, cues };
+        syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    addItemToCue: (cueId, item) => {
+      set((state) => {
+        const newProject = state.project
+          ? {
+              ...state.project,
+              cues: state.project.cues.map((c) =>
+                c.id === cueId ? { ...c, items: [...c.items, item] } : c,
+              ),
+            }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    updateItem: (cueId, itemId, updates) => {
+      set((state) => {
+        const newProject = state.project
+          ? {
+              ...state.project,
+              cues: state.project.cues.map((c) =>
+                c.id === cueId
+                  ? {
+                      ...c,
+                      items: c.items.map((i) =>
+                        i.id === itemId ? { ...i, ...updates } : i,
+                      ),
+                    }
+                  : c,
+              ),
+            }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    removeItem: (cueId, itemId) => {
+      set((state) => {
+        const newProject = state.project
+          ? {
+              ...state.project,
+              cues: state.project.cues.map((c) =>
+                c.id === cueId
+                  ? { ...c, items: c.items.filter((i) => i.id !== itemId) }
+                  : c,
+              ),
+            }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    addOutput: (output) => {
+      set((state) => {
+        const newProject = state.project
+          ? { ...state.project, outputs: [...state.project.outputs, output] }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    updateOutput: (id, updates) => {
+      set((state) => {
+        const newProject = state.project
+          ? {
+              ...state.project,
+              outputs: state.project.outputs.map((o) =>
+                o.id === id ? { ...o, ...updates } : o,
+              ),
+            }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    removeOutput: (id) => {
+      set((state) => {
+        const newProject = state.project
+          ? {
+              ...state.project,
+              outputs: state.project.outputs.filter((o) => o.id !== id),
+            }
+          : null;
+        if (newProject) syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
+      });
+    },
+
+    setMasterBrightness: (value) => {
+      invoke("set_master_brightness", { value }).catch(console.error);
+      set((state) => {
+        const newProject = state.project
+          ? { ...state.project, masterBrightness: value }
+          : null;
+        // Note: set_master_brightness already updates backend, no need to sync full project
+        return { project: newProject };
+      });
+    },
+  })),
+);
