@@ -3947,6 +3947,7 @@ dependencies = [
  "gstreamer-pbutils",
  "gstreamer-video",
  "parking_lot",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tauri",

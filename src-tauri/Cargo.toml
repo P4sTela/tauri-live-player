@@ -34,6 +34,9 @@ thiserror = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 parking_lot = "0.12"
 
+# Window handle for GStreamer sink
+raw-window-handle = "0.6"
+
 # GStreamer
 gstreamer = "0.23"
 gstreamer-video = "0.23"

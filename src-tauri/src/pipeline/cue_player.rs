@@ -4,7 +4,18 @@ use std::collections::HashMap;
 
 use crate::audio::sink::create_audio_sink;
 use crate::error::{AppError, AppResult};
+use crate::output::native_handle::{
+    create_fallback_sink, create_video_sink_with_handle, NativeHandle,
+};
 use crate::types::*;
+
+/// 出力先とモニター情報、ネイティブハンドルを組み合わせた構造体
+#[derive(Debug, Clone)]
+pub struct OutputWithMonitor {
+    pub output: OutputTarget,
+    pub monitor: Option<MonitorInfo>,
+    pub native_handle: Option<NativeHandle>,
+}
 
 pub struct CuePlayer {
     pipeline: gst::Pipeline,
@@ -26,7 +37,19 @@ impl CuePlayer {
     }
 
     /// Cueを読み込んでパイプラインを構築
-    pub fn load_cue(&mut self, cue: &Cue, outputs: &[OutputTarget]) -> AppResult<()> {
+    ///
+    /// # Arguments
+    /// * `cue` - 再生するキュー
+    /// * `outputs` - 出力先の一覧
+    /// * `monitors` - モニター情報の一覧
+    /// * `native_handles` - 出力IDとネイティブハンドルのマッピング（OutputManagerから取得）
+    pub fn load_cue(
+        &mut self,
+        cue: &Cue,
+        outputs: &[OutputTarget],
+        monitors: &[MonitorInfo],
+        native_handles: &HashMap<String, NativeHandle>,
+    ) -> AppResult<()> {
         // パイプラインをリセット
         self.pipeline
             .set_state(gst::State::Null)
@@ -39,22 +62,54 @@ impl CuePlayer {
         }
         self.video_balances.clear();
 
+        // 出力とモニター情報、ネイティブハンドルを組み合わせ
+        println!(
+            "[CuePlayer] Project output IDs: {:?}",
+            outputs.iter().map(|o| &o.id).collect::<Vec<_>>()
+        );
+        println!(
+            "[CuePlayer] Native handle keys: {:?}",
+            native_handles.keys().collect::<Vec<_>>()
+        );
+
+        let outputs_with_monitors: Vec<OutputWithMonitor> = outputs
+            .iter()
+            .map(|o| {
+                let monitor = if o.output_type == OutputType::Display {
+                    monitors.get(o.display_index.unwrap_or(0)).cloned()
+                } else {
+                    None
+                };
+                let native_handle = native_handles.get(&o.id).cloned();
+                println!(
+                    "[CuePlayer] Output '{}' -> native_handle present: {}",
+                    o.id,
+                    native_handle.is_some()
+                );
+                OutputWithMonitor {
+                    output: o.clone(),
+                    monitor,
+                    native_handle,
+                }
+            })
+            .collect();
+
         // 出力ごとの明るさ設定を保存
-        for output in outputs {
+        for owm in &outputs_with_monitors {
             self.output_brightness
-                .insert(output.id.clone(), output.brightness);
+                .insert(owm.output.id.clone(), owm.output.brightness);
         }
 
         // 各メディアアイテムを追加
         for item in &cue.items {
-            let output = outputs
+            let owm = outputs_with_monitors
                 .iter()
-                .find(|o| o.id == item.output_id)
+                .find(|o| o.output.id == item.output_id)
                 .ok_or_else(|| {
                     AppError::NotFound(format!("Output not found: {}", item.output_id))
                 })?;
 
-            self.add_media_item(item, output)?;
+            self.add_media_item(item, owm)?;
         }
 
         // PAUSED状態にしてプリロール
@@ -85,7 +140,7 @@ impl CuePlayer {
         Ok(())
     }
 
-    fn add_media_item(&mut self, item: &MediaItem, output: &OutputTarget) -> AppResult<()> {
+    fn add_media_item(&mut self, item: &MediaItem, owm: &OutputWithMonitor) -> AppResult<()> {
         // ソースエレメント
         let src = gst::ElementFactory::make("filesrc")
             .property("location", &item.path)
@@ -105,9 +160,9 @@ impl CuePlayer {
 
         // 動的パッドのためのクロージャ用変数
         let item_clone = item.clone();
-        let output_clone = output.clone();
+        let owm_clone = owm.clone();
         let pipeline_weak = self.pipeline.downgrade();
-        let brightness = self.get_effective_brightness(&output.id);
+        let brightness = self.get_effective_brightness(&owm.output.id);
 
         decode.connect_pad_added(move |_, src_pad| {
             let pipeline = match pipeline_weak.upgrade() {
@@ -143,7 +198,7 @@ impl CuePlayer {
                     Err(_) => return,
                 };
 
-                let sink = match create_video_sink(&output_clone) {
+                let sink = match create_video_sink(&owm_clone) {
                     Ok(s) => s,
                     Err(_) => return,
                 };
@@ -180,7 +235,7 @@ impl CuePlayer {
                     Err(_) => return,
                 };
 
-                let sink = match create_audio_sink(&output_clone) {
+                let sink = match create_audio_sink(&owm_clone.output) {
                     Ok(s) => s,
                     Err(_) => return,
                 };
@@ -309,18 +364,67 @@ impl Drop for CuePlayer {
     }
 }
 
-fn create_video_sink(output: &OutputTarget) -> Result<gst::Element, gst::glib::BoolError> {
-    match output.output_type {
+fn create_video_sink(owm: &OutputWithMonitor) -> Result<gst::Element, gst::glib::BoolError> {
+    match owm.output.output_type {
         OutputType::Display => {
-            // TODO: 特定ディスプレイへの出力
-            gst::ElementFactory::make("autovideosink").build()
+            // モニター情報をログ出力（デバッグ用）
+            if let Some(ref monitor) = owm.monitor {
+                let fullscreen = owm.output.fullscreen.unwrap_or(true);
+                println!(
+                    "[CuePlayer] Display output: {} -> Monitor {} at ({}, {}) {}x{} fullscreen={}",
+                    owm.output.name,
+                    monitor.index,
+                    monitor.x,
+                    monitor.y,
+                    monitor.width,
+                    monitor.height,
+                    fullscreen
+                );
+            } else {
+                println!(
+                    "[CuePlayer] Display output: {} -> Default monitor",
+                    owm.output.name
+                );
+            }
+
+            // ネイティブハンドルがあればプラットフォーム固有シンクを使用
+            if let Some(ref handle) = owm.native_handle {
+                println!(
+                    "[CuePlayer] Using platform-specific sink with native handle for '{}'",
+                    owm.output.name
+                );
+                match create_video_sink_with_handle(handle) {
+                    Ok(sink) => {
+                        println!(
+                            "[CuePlayer] Successfully created platform-specific sink for '{}'",
+                            owm.output.name
+                        );
+                        return Ok(sink);
+                    }
+                    Err(e) => {
+                        println!(
+                            "[CuePlayer] Failed to create platform sink: {:?}, falling back to autovideosink",
+                            e
+                        );
+                    }
+                }
+            } else {
+                println!(
+                    "[CuePlayer] No native handle available for '{}', using fallback",
+                    owm.output.name
+                );
+            }
+
+            // フォールバック: autovideosink
+            create_fallback_sink()
         }
         OutputType::Ndi => {
             // NDI送信
+            println!("[CuePlayer] Creating NDI sink for '{}'", owm.output.name);
             gst::ElementFactory::make("ndisink")
                 .property(
                     "ndi-name",
-                    output.ndi_name.as_deref().unwrap_or("TauriLivePlayer"),
+                    owm.output.ndi_name.as_deref().unwrap_or("TauriLivePlayer"),
                 )
                 .build()
         }

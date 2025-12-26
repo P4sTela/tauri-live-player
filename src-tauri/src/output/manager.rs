@@ -4,13 +4,18 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use crate::error::{AppError, AppResult};
 use crate::types::*;
 
+use super::native_handle::{get_native_handle, NativeHandle};
+
 pub struct OutputManager {
-    outputs: HashMap<String, OutputWindow>,
+    outputs: HashMap<String, OutputWindowState>,
 }
 
-struct OutputWindow {
-    id: String,
-    output_type: OutputType,
+/// State for an output window including native handle for GStreamer
+pub struct OutputWindowState {
+    pub id: String,
+    pub output_type: OutputType,
+    pub native_handle: Option<NativeHandle>,
+    pub monitor_index: Option<usize>,
 }
 
 impl OutputManager {
@@ -20,65 +25,131 @@ impl OutputManager {
         }
     }
 
-    pub fn create_output(&mut self, app: &AppHandle, config: &OutputTarget) -> AppResult<()> {
+    /// Create an output window and extract native handle for GStreamer
+    ///
+    /// # Arguments
+    /// * `app` - Tauri AppHandle
+    /// * `config` - Output configuration
+    /// * `monitor` - Monitor info for fullscreen mode (None for windowed mode)
+    pub fn create_output(
+        &mut self,
+        app: &AppHandle,
+        config: &OutputTarget,
+        monitor: Option<&MonitorInfo>,
+    ) -> AppResult<Option<NativeHandle>> {
         match config.output_type {
             OutputType::Display => {
-                let monitors = app
-                    .available_monitors()
-                    .map_err(|e| AppError::Output(format!("Failed to get monitors: {:?}", e)))?;
+                let is_fullscreen = config.fullscreen.unwrap_or(true) && monitor.is_some();
 
-                let monitor = monitors
-                    .get(config.display_index.unwrap_or(0))
-                    .ok_or_else(|| AppError::NotFound("Monitor not found".to_string()))?;
+                let window = if let Some(m) = monitor {
+                    // Fullscreen mode: position on specific monitor
+                    println!(
+                        "[OutputManager] Creating fullscreen window on monitor {} ({}, {})",
+                        m.index, m.width, m.height
+                    );
+                    WebviewWindowBuilder::new(
+                        app,
+                        format!("output_{}", config.id),
+                        WebviewUrl::App("output.html".into()),
+                    )
+                    .title(&config.name)
+                    .position(m.x as f64, m.y as f64)
+                    .inner_size(m.width as f64, m.height as f64)
+                    .fullscreen(true)
+                    .decorations(false)
+                    .always_on_top(true)
+                    .build()
+                    .map_err(|e| AppError::Output(format!("Failed to create window: {:?}", e)))?
+                } else {
+                    // Windowed mode: normal resizable window
+                    println!("[OutputManager] Creating windowed output (not fullscreen)");
+                    WebviewWindowBuilder::new(
+                        app,
+                        format!("output_{}", config.id),
+                        WebviewUrl::App("output.html".into()),
+                    )
+                    .title(&config.name)
+                    .inner_size(1280.0, 720.0)
+                    .fullscreen(false)
+                    .decorations(true)
+                    .resizable(true)
+                    .build()
+                    .map_err(|e| AppError::Output(format!("Failed to create window: {:?}", e)))?
+                };
 
-                let position = monitor.position();
-                let size = monitor.size();
+                // Extract native handle for GStreamer
+                let native_handle = get_native_handle(&window);
 
-                let _window = WebviewWindowBuilder::new(
-                    app,
-                    format!("output_{}", config.id),
-                    WebviewUrl::App("output.html".into()),
-                )
-                .title(&config.name)
-                .position(position.x as f64, position.y as f64)
-                .inner_size(size.width as f64, size.height as f64)
-                .fullscreen(config.fullscreen.unwrap_or(true))
-                .decorations(false)
-                .always_on_top(true)
-                .build()
-                .map_err(|e| AppError::Output(format!("Failed to create window: {:?}", e)))?;
+                let monitor_index = monitor.map(|m| m.index);
+
+                if native_handle.is_some() {
+                    println!(
+                        "[OutputManager] Created output window '{}' (fullscreen={}, monitor={:?}) with native handle",
+                        config.name, is_fullscreen, monitor_index
+                    );
+                } else {
+                    println!(
+                        "[OutputManager] Warning: Could not get native handle for output '{}'",
+                        config.name
+                    );
+                }
+
+                let handle_clone = native_handle.clone();
 
                 self.outputs.insert(
                     config.id.clone(),
-                    OutputWindow {
+                    OutputWindowState {
                         id: config.id.clone(),
                         output_type: OutputType::Display,
+                        native_handle,
+                        monitor_index,
                     },
                 );
+
+                Ok(handle_clone)
             }
             OutputType::Ndi => {
                 // NDI出力はパイプラインで処理、ウィンドウ不要
                 self.outputs.insert(
                     config.id.clone(),
-                    OutputWindow {
+                    OutputWindowState {
                         id: config.id.clone(),
                         output_type: OutputType::Ndi,
+                        native_handle: None,
+                        monitor_index: None,
                     },
                 );
+                Ok(None)
             }
             OutputType::Audio => {
                 // オーディオ出力もパイプラインで処理
                 self.outputs.insert(
                     config.id.clone(),
-                    OutputWindow {
+                    OutputWindowState {
                         id: config.id.clone(),
                         output_type: OutputType::Audio,
+                        native_handle: None,
+                        monitor_index: None,
                     },
                 );
+                Ok(None)
             }
         }
+    }
 
-        Ok(())
+    /// Get the native handle for an output (for GStreamer sink creation)
+    pub fn get_native_handle(&self, output_id: &str) -> Option<NativeHandle> {
+        self.outputs.get(output_id)?.native_handle.clone()
+    }
+
+    /// Check if an output window exists
+    pub fn has_output(&self, output_id: &str) -> bool {
+        self.outputs.contains_key(output_id)
+    }
+
+    /// Get all open output IDs
+    pub fn get_open_output_ids(&self) -> Vec<String> {
+        self.outputs.keys().cloned().collect()
     }
 
     pub fn close_output(&mut self, app: &AppHandle, id: &str) {

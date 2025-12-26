@@ -1,11 +1,21 @@
-use tauri::State;
+use std::collections::HashMap;
+use tauri::{AppHandle, State};
 
+use crate::output::manager::OutputManager;
+use crate::output::native_handle::NativeHandle;
 use crate::state::AppState;
 use crate::types::*;
 
 /// テスト用: 単一のビデオファイルを直接再生
 #[tauri::command]
-pub async fn play_test_video(state: State<'_, AppState>, path: String) -> Result<(), String> {
+pub async fn play_test_video(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    path: String,
+) -> Result<(), String> {
+    // モニター一覧を取得
+    let monitors = OutputManager::get_monitor_list(&app).map_err(|e| e.to_string())?;
+
     let mut player_guard = state.player.lock();
     let player = player_guard
         .as_mut()
@@ -45,8 +55,11 @@ pub async fn play_test_video(state: State<'_, AppState>, path: String) -> Result
         audio_channels: None,
     };
 
+    // ネイティブハンドルを取得（テスト用は空のマップ）
+    let native_handles: HashMap<String, NativeHandle> = HashMap::new();
+
     player
-        .load_cue(&test_cue, &[test_output])
+        .load_cue(&test_cue, &[test_output], &monitors, &native_handles)
         .map_err(|e| e.to_string())?;
 
     player.play().map_err(|e| e.to_string())?;
@@ -55,7 +68,39 @@ pub async fn play_test_video(state: State<'_, AppState>, path: String) -> Result
 }
 
 #[tauri::command]
-pub async fn load_cue(state: State<'_, AppState>, cue_index: usize) -> Result<(), String> {
+pub async fn load_cue(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    cue_index: usize,
+) -> Result<(), String> {
+    // モニター一覧を取得
+    let monitors = OutputManager::get_monitor_list(&app).map_err(|e| e.to_string())?;
+
+    // OutputManagerからネイティブハンドルを収集
+    let native_handles: HashMap<String, NativeHandle> = {
+        let output_manager = state.output_manager.lock();
+        let open_ids = output_manager.get_open_output_ids();
+        println!(
+            "[load_cue] Open output IDs in OutputManager: {:?}",
+            open_ids
+        );
+
+        let handles: HashMap<String, NativeHandle> = open_ids
+            .iter()
+            .filter_map(|id| {
+                output_manager
+                    .get_native_handle(id)
+                    .map(|handle| (id.clone(), handle))
+            })
+            .collect();
+
+        println!(
+            "[load_cue] Native handles collected: {:?}",
+            handles.keys().collect::<Vec<_>>()
+        );
+        handles
+    };
+
     let mut player_guard = state.player.lock();
     let project_guard = state.project.lock();
 
@@ -73,7 +118,7 @@ pub async fn load_cue(state: State<'_, AppState>, cue_index: usize) -> Result<()
         .ok_or_else(|| "Player not initialized".to_string())?;
 
     player
-        .load_cue(cue, &project.outputs)
+        .load_cue(cue, &project.outputs, &monitors, &native_handles)
         .map_err(|e| e.to_string())?;
 
     *state.current_cue_index.lock() = cue_index as i32;
