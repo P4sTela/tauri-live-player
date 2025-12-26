@@ -700,6 +700,141 @@ gst-launch-1.0 \
 
 ---
 
-*最終更新: 2025-12-25*  
-*バージョン: v5.2*  
+## 開発ログ
+
+### 2025-12-26 Session 1
+
+**完了:**
+- ✅ Phase 0: 環境構築（Tauri 2.0 + React + GStreamer）
+- ✅ Phase 1: 基本再生（decodebin + autovideosink でテスト再生動作）
+- ✅ Phase 2 (部分): UI実装
+  - Play/Edit タブ切り替えUI
+  - CueList 表示・追加・削除
+  - MediaItem 追加・削除（ファイルピッカー）
+  - BrightnessPanel（Master + 個別、Link機能）
+  - キーボードショートカット
+
+**後回し:**
+- プロジェクト保存/読込 → Cue再生が動いてから実装
+
+**設計メモ:**
+- UIは「Play」「Edit」2タブ構成
+  - Play: 本番用。大きなCueリスト + トランスポートコントロール
+  - Edit: 準備用。Cue編集、MediaItem管理、Output設定
+
+---
+
+### 2025-12-26 Session 2
+
+**完了:**
+- ✅ Output管理UI（OutputManager.tsx）
+  - Display/NDI/Audio 出力の追加・編集・削除
+  - EditView の左パネルに「Cues」「Outputs」タブで統合
+- ✅ MediaItem に出力先選択を追加
+  - 各MediaItemに対して出力先ドロップダウン
+  - メディアタイプに応じたフィルタリング（Video→Display/NDI, Audio→Audio）
+- ✅ Cue再生のRust実装確認
+  - CuePlayer: load_cue で複数MediaItemをパイプラインに追加
+  - decodebin の pad-added で動的にビデオ/オーディオチェーンを接続
+  - 出力ごとの videobalance で明るさ調整
+- ✅ Frontend-Backend 同期
+  - projectStore で全変更を update_project コマンド経由でRustに送信
+  - usePlayerSync で再生状態を100ms間隔でポーリング
+
+**テスト準備完了:**
+- TypeScript: ✅ コンパイル成功
+- Rust: ✅ コンパイル成功（警告のみ）
+- 次: `pnpm tauri dev` で実際のCue再生をテスト
+
+---
+
+### 2025-12-26 Session 3
+
+**完了:**
+- ✅ Phase 3: マルチ出力ウィンドウ（部分実装）
+  - outputStore 作成（モニター一覧取得、出力ウィンドウ開閉管理）
+  - OutputManager UI 拡張
+    - モニター一覧をドロップダウンで選択可能
+    - Display出力の「Open/Close」ボタン追加
+    - Fullscreenトグル追加
+  - GStreamer: load_cue にモニター情報を渡すように拡張
+    - OutputWithMonitor 構造体追加
+    - glimagesink を使用（autovideosink フォールバック）
+    - モニター位置情報をログ出力
+
+**技術的な制約:**
+- GStreamerの glimagesink/autovideosink はウィンドウ位置の直接制御が難しい
+- macOSでは GStreamer が自動でウィンドウを作成する
+- 将来的には Tauri ウィンドウに直接描画する方法を検討
+
+**実装の順序決定:**
+1. ✅ Phase 0-1: 環境構築・基本再生
+2. ✅ Phase 2: UI実装（Cue管理、Output管理）
+3. ✅ Phase 3: マルチ出力（モニター選択UI、基盤実装）
+4. 次: 以下のいずれか
+   - A) プロジェクト保存/読込（実用性向上）
+   - B) Phase 4a: NDI送信（機能拡張）
+   - C) UX改善（ドラッグ&ドロップ、ループ再生など）
+
+**次のステップ候補:**
+- プロジェクト保存/読込を実装して作業内容を永続化
+- または NDI 送信機能を追加
+
+---
+
+### 2025-12-26 Session 4
+
+**完了:**
+- ✅ **アプローチ2実装: プラットフォーム固有シンク + ネイティブハンドル**
+  - TECHNICAL_DESIGN.md にセクション9「マルチモニター出力設計（アプローチ2）」を追加
+    - アーキテクチャ図
+    - プラットフォーム別実装（macOS: NSView + glimagesink、Windows: HWND + d3d11videosink）
+    - 実装フロー
+    - 依存関係と注意事項
+  
+  - `native_handle.rs` 新規作成
+    - `NativeHandle` enum（NSView / HWND / X11Window）
+    - `get_native_handle()`: Tauri WebviewWindow からネイティブハンドル抽出
+    - `create_video_sink_with_handle()`: プラットフォーム固有シンク作成
+    - `set_window_handle_overlay()`: GstVideoOverlay インターフェースでハンドル設定
+    - `create_fallback_sink()`: autovideosink フォールバック
+  
+  - `OutputManager` 拡張
+    - `OutputWindowState` にネイティブハンドル・モニターインデックスを追加
+    - `create_output()` がネイティブハンドルを返すように変更
+    - `get_native_handle()`, `has_output()`, `get_open_output_ids()` 追加
+  
+  - `CuePlayer` 統合
+    - `OutputWithMonitor` に `native_handle` フィールド追加
+    - `load_cue()` が `native_handles` HashMap を受け取るように変更
+    - `create_video_sink()` でハンドルがあればプラットフォーム固有シンクを使用
+  
+  - `commands/player.rs` 更新
+    - `load_cue` コマンドで OutputManager からネイティブハンドルを収集
+  
+  - `outputStore.ts` 更新
+    - `openOutputs` を `Set` から `Map<string, OpenOutputInfo>` に変更
+    - `openOutput()` がモニター情報を受け取るように変更
+    - `getOutputMonitor()` 追加
+  
+  - `OutputManager.tsx` 更新
+    - `handleToggleOutput()` でモニター情報を渡すように変更
+  
+  - `Cargo.toml` に `raw-window-handle = "0.6"` 追加
+
+**技術ハイライト:**
+- Tauri ウィンドウを特定モニターにフルスクリーン配置
+- `window.window_handle()` でネイティブハンドル取得
+- GStreamer `VideoOverlay` インターフェースでハンドル設定
+- フレームコピーなしでGPU直接レンダリング
+
+**次のステップ:**
+- 実際にテストして動作確認
+- プロジェクト保存/読込
+- NDI送信機能
+
+---
+
+*最終更新: 2025-12-26*  
+*バージョン: v5.5*  
 *作成者: Claude + Kota*

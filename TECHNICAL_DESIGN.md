@@ -2044,6 +2044,398 @@ jobs:
 
 ---
 
+## 9. マルチモニター出力設計（アプローチ2）
+
+### 9.1 概要
+
+GStreamerの映像を特定のモニターに出力するための設計。Tauriで出力ウィンドウを作成し、ネイティブウィンドウハンドルをGStreamerシンクに渡すことで、フレームコピーなしで直接レンダリングを実現する。
+
+### 9.2 アプローチ比較
+
+| 用途 | アプローチ | メリット | デメリット |
+|------|-----------|---------|-----------|
+| 本番出力 | **Approach 2**: Tauri Window + Native Handle | 低レイテンシ、GPU直接レンダリング | プラットフォーム固有コード必要 |
+| プレビュー | **AppSink → WebView**: フレームをフロントエンドに送信 | 柔軟なUI統合 | オーバーヘッドあり |
+| NDI出力 | **ndisink**: GStreamer NDIプラグイン | 標準的、安定 | NDI SDK依存 |
+
+### 9.3 アーキテクチャ
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  GStreamer Pipeline                                             │
+│                                                                 │
+│  filesrc → decodebin → videoconvert → videobalance              │
+│                                            │                    │
+│                                            ↓                    │
+│                              ┌─────────────────────────────┐    │
+│                              │  Platform-Specific Sink     │    │
+│                              │  (glimagesink / d3d11sink)  │    │
+│                              │         ↑                   │    │
+│                              │   window-handle property    │    │
+│                              └─────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+                                       ↑
+                                       │ Native Handle
+                                       │
+┌─────────────────────────────────────────────────────────────────┐
+│  Tauri Application                                              │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Output Window (WebviewWindow)                          │   │
+│  │  - 特定モニターに配置                                    │   │
+│  │  - フルスクリーン                                        │   │
+│  │  - 装飾なし                                              │   │
+│  │                                                          │   │
+│  │  window.window_handle() → NSView* (macOS)               │   │
+│  │                        → HWND (Windows)                  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 9.4 プラットフォーム別実装
+
+#### 9.4.1 macOS (NSView + glimagesink)
+
+```rust
+// src-tauri/src/output/native_handle.rs
+
+#[cfg(target_os = "macos")]
+pub mod macos {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use tauri::WebviewWindow;
+    use gstreamer as gst;
+    
+    pub fn get_native_handle(window: &WebviewWindow) -> Option<*mut std::ffi::c_void> {
+        let handle = window.window_handle().ok()?;
+        match handle.as_raw() {
+            RawWindowHandle::AppKit(appkit) => {
+                // NSView pointer
+                Some(appkit.ns_view.as_ptr())
+            }
+            _ => None,
+        }
+    }
+    
+    pub fn create_video_sink_with_handle(
+        handle: *mut std::ffi::c_void,
+    ) -> Result<gst::Element, gst::glib::Error> {
+        let sink = gst::ElementFactory::make("glimagesink")
+            .build()?;
+        
+        // NSViewをシンクに設定
+        unsafe {
+            sink.set_property("window-handle", handle as u64);
+        }
+        
+        Ok(sink)
+    }
+}
+```
+
+#### 9.4.2 Windows (HWND + d3d11videosink)
+
+```rust
+#[cfg(target_os = "windows")]
+pub mod windows {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use tauri::WebviewWindow;
+    use gstreamer as gst;
+    
+    pub fn get_native_handle(window: &WebviewWindow) -> Option<isize> {
+        let handle = window.window_handle().ok()?;
+        match handle.as_raw() {
+            RawWindowHandle::Win32(win32) => {
+                // HWND
+                Some(win32.hwnd.get() as isize)
+            }
+            _ => None,
+        }
+    }
+    
+    pub fn create_video_sink_with_handle(
+        hwnd: isize,
+    ) -> Result<gst::Element, gst::glib::Error> {
+        let sink = gst::ElementFactory::make("d3d11videosink")
+            .build()?;
+        
+        // HWNDをシンクに設定
+        sink.set_property("window-handle", hwnd as u64);
+        
+        Ok(sink)
+    }
+}
+```
+
+### 9.5 出力ウィンドウ管理（改訂版）
+
+```rust
+// src-tauri/src/output/manager.rs (改訂版)
+
+use std::collections::HashMap;
+use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder};
+use crate::types::*;
+
+pub struct OutputManager {
+    outputs: HashMap<String, OutputWindowState>,
+}
+
+pub struct OutputWindowState {
+    pub id: String,
+    pub window: Option<WebviewWindow>,
+    pub native_handle: Option<NativeHandle>,
+    pub output_type: OutputType,
+    pub monitor_index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum NativeHandle {
+    #[cfg(target_os = "macos")]
+    NSView(*mut std::ffi::c_void),
+    #[cfg(target_os = "windows")]
+    HWND(isize),
+}
+
+impl OutputManager {
+    pub fn new() -> Self {
+        Self {
+            outputs: HashMap::new(),
+        }
+    }
+    
+    /// 出力ウィンドウを作成し、ネイティブハンドルを取得
+    pub fn create_output_window(
+        &mut self,
+        app: &AppHandle,
+        config: &OutputTarget,
+        monitor: &MonitorInfo,
+    ) -> Result<NativeHandle, Box<dyn std::error::Error>> {
+        // 指定モニターにフルスクリーンウィンドウを作成
+        let window = WebviewWindowBuilder::new(
+            app,
+            &format!("output_{}", config.id),
+            tauri::WebviewUrl::App("output.html".into()),
+        )
+        .title(&config.name)
+        .position(monitor.x as f64, monitor.y as f64)
+        .inner_size(monitor.width as f64, monitor.height as f64)
+        .fullscreen(config.fullscreen.unwrap_or(true))
+        .decorations(false)
+        .always_on_top(true)
+        .transparent(true)  // 透明背景（GStreamerがレンダリング）
+        .build()?;
+        
+        // ネイティブハンドルを取得
+        let native_handle = self.extract_native_handle(&window)?;
+        
+        self.outputs.insert(
+            config.id.clone(),
+            OutputWindowState {
+                id: config.id.clone(),
+                window: Some(window),
+                native_handle: Some(native_handle.clone()),
+                output_type: OutputType::Display,
+                monitor_index: monitor.index,
+            },
+        );
+        
+        Ok(native_handle)
+    }
+    
+    #[cfg(target_os = "macos")]
+    fn extract_native_handle(
+        &self,
+        window: &WebviewWindow,
+    ) -> Result<NativeHandle, Box<dyn std::error::Error>> {
+        use super::native_handle::macos;
+        
+        let handle = macos::get_native_handle(window)
+            .ok_or("Failed to get NSView handle")?;
+        
+        Ok(NativeHandle::NSView(handle))
+    }
+    
+    #[cfg(target_os = "windows")]
+    fn extract_native_handle(
+        &self,
+        window: &WebviewWindow,
+    ) -> Result<NativeHandle, Box<dyn std::error::Error>> {
+        use super::native_handle::windows;
+        
+        let handle = windows::get_native_handle(window)
+            .ok_or("Failed to get HWND handle")?;
+        
+        Ok(NativeHandle::HWND(handle))
+    }
+    
+    /// ウィンドウのネイティブハンドルを取得
+    pub fn get_native_handle(&self, output_id: &str) -> Option<NativeHandle> {
+        self.outputs.get(output_id)?.native_handle.clone()
+    }
+    
+    pub fn close_output(&mut self, id: &str) {
+        if let Some(output) = self.outputs.remove(id) {
+            if let Some(window) = output.window {
+                let _ = window.close();
+            }
+        }
+    }
+    
+    pub fn close_all(&mut self) {
+        for (_, output) in self.outputs.drain() {
+            if let Some(window) = output.window {
+                let _ = window.close();
+            }
+        }
+    }
+}
+```
+
+### 9.6 CuePlayer 統合（改訂版）
+
+```rust
+// src-tauri/src/pipeline/cue_player.rs (create_video_sink 改訂版)
+
+impl CuePlayer {
+    fn create_video_sink(
+        output: &OutputTarget,
+        native_handle: Option<&NativeHandle>,
+    ) -> Result<gst::Element, gst::glib::Error> {
+        match output.output_type {
+            OutputType::Display => {
+                if let Some(handle) = native_handle {
+                    // Approach 2: ネイティブハンドルを使用
+                    Self::create_platform_sink(handle)
+                } else {
+                    // フォールバック: autovideosink
+                    gst::ElementFactory::make("autovideosink").build()
+                }
+            }
+            OutputType::Ndi => {
+                gst::ElementFactory::make("ndisink")
+                    .property("ndi-name", output.ndi_name.as_ref().unwrap())
+                    .build()
+            }
+            OutputType::Audio => {
+                Err(gst::glib::Error::new(
+                    gst::CoreError::Failed,
+                    "Audio output cannot be used as video sink",
+                ))
+            }
+        }
+    }
+    
+    #[cfg(target_os = "macos")]
+    fn create_platform_sink(handle: &NativeHandle) -> Result<gst::Element, gst::glib::Error> {
+        use super::native_handle::macos;
+        
+        if let NativeHandle::NSView(ptr) = handle {
+            macos::create_video_sink_with_handle(*ptr)
+        } else {
+            Err(gst::glib::Error::new(
+                gst::CoreError::Failed,
+                "Invalid handle type for macOS",
+            ))
+        }
+    }
+    
+    #[cfg(target_os = "windows")]
+    fn create_platform_sink(handle: &NativeHandle) -> Result<gst::Element, gst::glib::Error> {
+        use super::native_handle::windows;
+        
+        if let NativeHandle::HWND(hwnd) = handle {
+            windows::create_video_sink_with_handle(*hwnd)
+        } else {
+            Err(gst::glib::Error::new(
+                gst::CoreError::Failed,
+                "Invalid handle type for Windows",
+            ))
+        }
+    }
+}
+```
+
+### 9.7 フロントエンド連携
+
+```typescript
+// src/stores/outputStore.ts (改訂版)
+
+interface OutputStore {
+  monitors: MonitorInfo[];
+  isLoadingMonitors: boolean;
+  openOutputs: Map<string, OpenOutputInfo>;
+  
+  fetchMonitors: () => Promise<void>;
+  openOutput: (output: OutputTarget, monitor: MonitorInfo) => Promise<void>;
+  closeOutput: (id: string) => Promise<void>;
+  closeAllOutputs: () => Promise<void>;
+  isOutputOpen: (id: string) => boolean;
+  getOutputMonitor: (id: string) => MonitorInfo | undefined;
+}
+
+interface OpenOutputInfo {
+  outputId: string;
+  monitorIndex: number;
+  isFullscreen: boolean;
+}
+```
+
+### 9.8 実装フロー
+
+```
+1. ユーザーがモニターを選択してOpen Output
+      ↓
+2. フロントエンド: outputStore.openOutput(output, monitor)
+      ↓
+3. Rust: OutputManager.create_output_window()
+   - Tauriウィンドウを指定モニターに作成
+   - window.window_handle() でネイティブハンドル取得
+   - ハンドルを保存
+      ↓
+4. Cue再生時: CuePlayer.load_cue()
+   - OutputManager からハンドルを取得
+   - create_video_sink() でプラットフォーム固有シンク作成
+   - ハンドルをシンクに設定
+      ↓
+5. GStreamerが直接ウィンドウにレンダリング
+   - フレームコピーなし
+   - GPU直接描画
+   - 低レイテンシ
+```
+
+### 9.9 依存関係
+
+```toml
+# Cargo.toml 追加
+
+[dependencies]
+raw-window-handle = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-app-kit = { version = "0.2", features = ["NSView", "NSWindow"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+```
+
+### 9.10 注意事項
+
+1. **スレッドセーフティ**: ネイティブハンドルはスレッド間で安全に共有できるが、ウィンドウ操作はメインスレッドで行う必要がある
+
+2. **ライフサイクル管理**: 
+   - ウィンドウが閉じられたらシンクからハンドルを解除
+   - パイプライン停止時にウィンドウを適切にクリーンアップ
+
+3. **フォールバック戦略**:
+   - ハンドル取得失敗時は `autovideosink` にフォールバック
+   - プラットフォーム固有シンクが利用不可の場合も同様
+
+4. **デバッグ**: 
+   - `GST_DEBUG=glimagesink:5` で詳細ログ出力
+   - ウィンドウハンドルの値をログ出力して確認
+
+---
+
 ## 参考資料
 
 - [GStreamer Documentation](https://gstreamer.freedesktop.org/documentation/)
