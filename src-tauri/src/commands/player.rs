@@ -229,11 +229,20 @@ pub async fn get_player_state(state: State<'_, AppState>) -> Result<PlayerState,
                 gstreamer::State::Playing => PlayerStatus::Playing,
                 _ => PlayerStatus::Idle,
             };
-            (
-                status,
-                player.position().unwrap_or(0.0),
-                player.duration().unwrap_or(0.0),
-            )
+            let pos = player.position().unwrap_or(0.0);
+            let dur = player.duration().unwrap_or(0.0);
+            // デバッグ: 最初の数回だけログ出力（高頻度ポーリングなので）
+            static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if count < 20 || count % 100 == 0 {
+                tracing::debug!(
+                    "get_player_state: status={:?}, position={:.3}s, duration={:.3}s",
+                    status,
+                    pos,
+                    dur
+                );
+            }
+            (status, pos, dur)
         }
         None => (PlayerStatus::Idle, 0.0, 0.0),
     };
