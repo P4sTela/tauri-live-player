@@ -10,7 +10,24 @@ import {
   Maximize,
   AppWindow,
   ChevronDown,
+  GripVertical,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useProjectStore } from "../../stores/projectStore";
 import { useOutputStore } from "../../stores/outputStore";
 import { Button } from "../ui/button";
@@ -38,10 +55,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { Card, CardContent } from "../ui/card";
 import { generateId } from "../../lib/utils";
 import { cn } from "../../lib/utils";
-import type { OutputTarget, OutputType, AudioDriver } from "../../types";
+import type {
+  OutputTarget,
+  OutputType,
+  AudioDriver,
+  MonitorInfo,
+} from "../../types";
 
 const OUTPUT_TYPE_ICONS = {
   display: Monitor,
@@ -55,12 +76,170 @@ const OUTPUT_TYPE_LABELS = {
   audio: "Audio",
 };
 
+// Sortable output item component
+interface SortableOutputItemProps {
+  output: OutputTarget;
+  isOpen: boolean;
+  monitor: MonitorInfo | undefined;
+  monitors: MonitorInfo[];
+  onEdit: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+  onOpenWindowed: () => void;
+  onOpenFullscreen: (monitorIndex: number) => void;
+}
+
+function SortableOutputItem({
+  output,
+  isOpen,
+  monitor,
+  monitors,
+  onEdit,
+  onDelete,
+  onClose,
+  onOpenWindowed,
+  onOpenFullscreen,
+}: SortableOutputItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: output.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const Icon = OUTPUT_TYPE_ICONS[output.type];
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 group",
+        isOpen && "bg-green-500/5",
+        isDragging && "opacity-50 bg-muted",
+      )}
+    >
+      {/* Drag handle */}
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing"
+      >
+        <GripVertical className="w-3 h-3 text-muted-foreground" />
+      </div>
+
+      {/* Icon */}
+      <div
+        className={cn(
+          "w-6 h-6 rounded flex items-center justify-center shrink-0",
+          output.type === "display" && "bg-blue-500/20 text-blue-500",
+          output.type === "ndi" && "bg-purple-500/20 text-purple-500",
+          output.type === "audio" && "bg-green-500/20 text-green-500",
+        )}
+      >
+        <Icon className="w-3.5 h-3.5" />
+      </div>
+
+      {/* Info */}
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium leading-tight flex items-center gap-1.5">
+          {output.name}
+          {isOpen && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
+        </div>
+        <div className="text-xs text-muted-foreground truncate">
+          {output.type === "display" && monitor && (
+            <>{monitor.name || `Display ${monitor.index}`}</>
+          )}
+          {output.type === "display" && !monitor && (
+            <>Display {output.displayIndex ?? 0}</>
+          )}
+          {output.type === "ndi" && output.ndiName}
+          {output.type === "audio" && (output.audioDriver || "auto")}
+        </div>
+      </div>
+
+      {/* Open/Close for Display */}
+      {output.type === "display" &&
+        (isOpen ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="h-6 px-2 text-xs bg-green-600 hover:bg-green-700 text-white"
+          >
+            <Square className="w-3 h-3 mr-1" />
+            Close
+          </Button>
+        ) : (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-6 px-2 text-xs">
+                Open
+                <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onOpenWindowed}>
+                <AppWindow className="w-3.5 h-3.5 mr-2" />
+                Window
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {monitors.map((m) => (
+                <DropdownMenuItem
+                  key={m.index}
+                  onClick={() => onOpenFullscreen(m.index)}
+                >
+                  <Maximize className="w-3.5 h-3.5 mr-2" />
+                  {m.name || `Display ${m.index}`}
+                  {m.isPrimary && " ★"}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ))}
+
+      {/* NDI indicator - auto-enabled when cue plays */}
+      {output.type === "ndi" && (
+        <span className="text-xs text-muted-foreground px-2">Auto</span>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center opacity-0 group-hover:opacity-100">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={onEdit}
+        >
+          <Edit2 className="w-3 h-3" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 text-destructive hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 className="w-3 h-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 interface OutputManagerProps {
   compact?: boolean;
 }
 
 export function OutputManager({ compact = false }: OutputManagerProps) {
-  const { project, addOutput, updateOutput, removeOutput } = useProjectStore();
+  const { project, addOutput, updateOutput, removeOutput, reorderOutputs } =
+    useProjectStore();
   const {
     monitors,
     isLoadingMonitors,
@@ -73,7 +252,13 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
   const [editingOutput, setEditingOutput] = useState<OutputTarget | null>(null);
   const [isAdding, setIsAdding] = useState(false);
 
-  // モニター一覧を取得
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
   useEffect(() => {
     fetchMonitors();
   }, [fetchMonitors]);
@@ -88,7 +273,7 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
       id: generateId(),
       name: `${OUTPUT_TYPE_LABELS[type]} ${count}`,
       type,
-      brightness: null, // Master連動
+      brightness: null,
       ...(type === "display" && { displayIndex: 0, fullscreen: true }),
       ...(type === "ndi" && { ndiName: `LivePlayer_${count}` }),
       ...(type === "audio" && { audioDriver: "auto" as AudioDriver }),
@@ -105,7 +290,6 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
   };
 
   const handleDeleteOutput = (id: string) => {
-    // 開いていたら閉じる
     if (isOutputOpen(id)) {
       closeOutput(id);
     }
@@ -130,9 +314,21 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
     await openOutput(output, null);
   };
 
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = project.outputs.findIndex((o) => o.id === active.id);
+    const newIndex = project.outputs.findIndex((o) => o.id === over.id);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      reorderOutputs(oldIndex, newIndex);
+    }
+  };
+
   if (compact) {
     return (
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {project.outputs.map((output) => {
           const Icon = OUTPUT_TYPE_ICONS[output.type];
           const isOpen = isOutputOpen(output.id);
@@ -140,7 +336,7 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
             <div
               key={output.id}
               className={cn(
-                "flex items-center gap-1 px-2 py-1 rounded text-sm cursor-pointer transition-colors",
+                "flex items-center gap-1 px-2 py-0.5 rounded text-xs cursor-pointer transition-colors",
                 isOpen ? "bg-green-500/20 text-green-500" : "bg-muted",
               )}
               onClick={() =>
@@ -149,14 +345,16 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
             >
               <Icon className="w-3 h-3" />
               <span>{output.name}</span>
-              {isOpen && <span className="w-2 h-2 rounded-full bg-green-500" />}
+              {isOpen && (
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+              )}
             </div>
           );
         })}
         <Button
           variant="ghost"
           size="sm"
-          className="h-7"
+          className="h-5 px-1.5"
           onClick={() => setIsAdding(true)}
         >
           <Plus className="w-3 h-3" />
@@ -166,183 +364,94 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-1">
       {/* Output List */}
       {project.outputs.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">
-          <p className="mb-4">No outputs configured.</p>
-          <Button variant="outline" onClick={() => setIsAdding(true)}>
-            <Plus className="w-4 h-4 mr-2" />
+        <div className="text-center text-muted-foreground py-4 text-sm">
+          <p className="mb-2">No outputs configured.</p>
+          <Button variant="outline" size="sm" onClick={() => setIsAdding(true)}>
+            <Plus className="w-3 h-3 mr-1" />
             Add Output
           </Button>
         </div>
       ) : (
-        <div className="space-y-2">
-          {project.outputs.map((output) => {
-            const Icon = OUTPUT_TYPE_ICONS[output.type];
-            const isOpen = isOutputOpen(output.id);
-            const monitor = monitors.find(
-              (m) => m.index === (output.displayIndex ?? 0),
-            );
-
-            return (
-              <Card
-                key={output.id}
-                className={cn(isOpen && "border-green-500/50")}
-              >
-                <CardContent className="p-3">
-                  <div className="flex items-center gap-3">
-                    {/* Icon with status */}
-                    <div
-                      className={cn(
-                        "w-10 h-10 rounded flex items-center justify-center relative",
-                        output.type === "display" &&
-                          "bg-blue-500/20 text-blue-500",
-                        output.type === "ndi" &&
-                          "bg-purple-500/20 text-purple-500",
-                        output.type === "audio" &&
-                          "bg-green-500/20 text-green-500",
-                      )}
-                    >
-                      <Icon className="w-5 h-5" />
-                      {isOpen && (
-                        <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-green-500 border-2 border-background" />
-                      )}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium">{output.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {output.type === "display" && monitor && (
-                          <>
-                            {monitor.name || `Display ${monitor.index}`} (
-                            {monitor.width}x{monitor.height})
-                            {monitor.isPrimary && " - Primary"}
-                          </>
-                        )}
-                        {output.type === "display" && !monitor && (
-                          <>Display {output.displayIndex ?? 0}</>
-                        )}
-                        {output.type === "ndi" && output.ndiName}
-                        {output.type === "audio" &&
-                          `${output.audioDriver || "auto"}`}
-                      </div>
-                    </div>
-
-                    {/* Open/Close for Display outputs */}
-                    {output.type === "display" &&
-                      (isOpen ? (
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleCloseOutput(output)}
-                          className="gap-1 bg-green-600 hover:bg-green-700"
-                        >
-                          <Square className="w-3 h-3" />
-                          Close
-                        </Button>
-                      ) : (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="gap-1"
-                            >
-                              Open
-                              <ChevronDown className="w-3 h-3" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => handleOpenWindowed(output)}
-                            >
-                              <AppWindow className="w-4 h-4 mr-2" />
-                              Window
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            {monitors.map((m) => (
-                              <DropdownMenuItem
-                                key={m.index}
-                                onClick={() =>
-                                  handleOpenFullscreen(output, m.index)
-                                }
-                              >
-                                <Maximize className="w-4 h-4 mr-2" />
-                                {m.name || `Display ${m.index}`}
-                                {m.isPrimary && " ★"}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      ))}
-
-                    {/* Edit */}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setEditingOutput({ ...output })}
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </Button>
-
-                    {/* Delete */}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => handleDeleteOutput(output.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => setIsAdding(true)}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={project.outputs.map((o) => o.id)}
+            strategy={verticalListSortingStrategy}
           >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Output
-          </Button>
-        </div>
+            <div className="space-y-0.5">
+              {project.outputs.map((output) => {
+                const monitor = monitors.find(
+                  (m) => m.index === (output.displayIndex ?? 0),
+                );
+
+                return (
+                  <SortableOutputItem
+                    key={output.id}
+                    output={output}
+                    isOpen={isOutputOpen(output.id)}
+                    monitor={monitor}
+                    monitors={monitors}
+                    onEdit={() => setEditingOutput({ ...output })}
+                    onDelete={() => handleDeleteOutput(output.id)}
+                    onClose={() => handleCloseOutput(output)}
+                    onOpenWindowed={() => handleOpenWindowed(output)}
+                    onOpenFullscreen={(idx) =>
+                      handleOpenFullscreen(output, idx)
+                    }
+                  />
+                );
+              })}
+
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full h-7 text-xs text-muted-foreground"
+                onClick={() => setIsAdding(true)}
+              >
+                <Plus className="w-3 h-3 mr-1" />
+                Add Output
+              </Button>
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       {/* Add Output Dialog */}
       <Dialog open={isAdding} onOpenChange={setIsAdding}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Add Output</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-2">
             <Button
               variant="outline"
-              className="h-24 flex-col gap-2"
+              className="h-16 flex-col gap-1 text-xs"
               onClick={() => handleAddOutput("display")}
             >
-              <Monitor className="w-8 h-8 text-blue-500" />
-              <span>Display</span>
+              <Monitor className="w-5 h-5 text-blue-500" />
+              Display
             </Button>
             <Button
               variant="outline"
-              className="h-24 flex-col gap-2"
+              className="h-16 flex-col gap-1 text-xs"
               onClick={() => handleAddOutput("ndi")}
             >
-              <Radio className="w-8 h-8 text-purple-500" />
-              <span>NDI</span>
+              <Radio className="w-5 h-5 text-purple-500" />
+              NDI
             </Button>
             <Button
               variant="outline"
-              className="h-24 flex-col gap-2"
+              className="h-16 flex-col gap-1 text-xs"
               onClick={() => handleAddOutput("audio")}
             >
-              <Volume2 className="w-8 h-8 text-green-500" />
-              <span>Audio</span>
+              <Volume2 className="w-5 h-5 text-green-500" />
+              Audio
             </Button>
           </div>
         </DialogContent>
@@ -353,27 +462,82 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
         open={!!editingOutput}
         onOpenChange={() => setEditingOutput(null)}
       >
-        <DialogContent>
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Edit Output</DialogTitle>
           </DialogHeader>
           {editingOutput && (
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="output-name">Name</Label>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="output-name" className="text-xs">
+                  Name
+                </Label>
                 <Input
                   id="output-name"
                   value={editingOutput.name}
                   onChange={(e) =>
                     setEditingOutput({ ...editingOutput, name: e.target.value })
                   }
+                  className="h-8"
                 />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="output-type" className="text-xs">
+                  Type
+                </Label>
+                <Select
+                  value={editingOutput.type}
+                  onValueChange={(value: OutputType) =>
+                    setEditingOutput({
+                      ...editingOutput,
+                      type: value,
+                      // Set default values for the new type
+                      ...(value === "display" && {
+                        displayIndex: editingOutput.displayIndex ?? 0,
+                        fullscreen: editingOutput.fullscreen ?? true,
+                      }),
+                      ...(value === "ndi" && {
+                        ndiName: editingOutput.ndiName ?? "LivePlayer",
+                      }),
+                      ...(value === "audio" && {
+                        audioDriver: editingOutput.audioDriver ?? "auto",
+                      }),
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="display">
+                      <div className="flex items-center gap-2">
+                        <Monitor className="w-4 h-4 text-blue-500" />
+                        Display
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="ndi">
+                      <div className="flex items-center gap-2">
+                        <Radio className="w-4 h-4 text-purple-500" />
+                        NDI
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="audio">
+                      <div className="flex items-center gap-2">
+                        <Volume2 className="w-4 h-4 text-green-500" />
+                        Audio
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {editingOutput.type === "display" && (
                 <>
-                  <div>
-                    <Label htmlFor="display-select">Monitor</Label>
+                  <div className="space-y-1">
+                    <Label htmlFor="display-select" className="text-xs">
+                      Monitor
+                    </Label>
                     <Select
                       value={String(editingOutput.displayIndex ?? 0)}
                       onValueChange={(value) =>
@@ -383,7 +547,7 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
                         })
                       }
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="h-8">
                         <SelectValue placeholder="Select monitor" />
                       </SelectTrigger>
                       <SelectContent>
@@ -405,7 +569,9 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
                     </Select>
                   </div>
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="fullscreen">Fullscreen</Label>
+                    <Label htmlFor="fullscreen" className="text-xs">
+                      Fullscreen
+                    </Label>
                     <Switch
                       id="fullscreen"
                       checked={editingOutput.fullscreen ?? true}
@@ -421,8 +587,10 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
               )}
 
               {editingOutput.type === "ndi" && (
-                <div>
-                  <Label htmlFor="ndi-name">NDI Name</Label>
+                <div className="space-y-1">
+                  <Label htmlFor="ndi-name" className="text-xs">
+                    NDI Name
+                  </Label>
                   <Input
                     id="ndi-name"
                     value={editingOutput.ndiName ?? ""}
@@ -432,16 +600,16 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
                         ndiName: e.target.value,
                       })
                     }
+                    className="h-8"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    This name will be visible on the network
-                  </p>
                 </div>
               )}
 
               {editingOutput.type === "audio" && (
-                <div>
-                  <Label htmlFor="audio-driver">Audio Driver</Label>
+                <div className="space-y-1">
+                  <Label htmlFor="audio-driver" className="text-xs">
+                    Audio Driver
+                  </Label>
                   <Select
                     value={editingOutput.audioDriver ?? "auto"}
                     onValueChange={(value) =>
@@ -451,7 +619,7 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
                       })
                     }
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="h-8">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -470,10 +638,16 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingOutput(null)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditingOutput(null)}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSaveOutput}>Save</Button>
+            <Button size="sm" onClick={handleSaveOutput}>
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

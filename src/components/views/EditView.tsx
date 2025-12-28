@@ -5,25 +5,35 @@ import {
   Edit2,
   FileVideo,
   FileAudio,
-  GripVertical,
   Monitor,
   Radio,
   Volume2,
   Settings2,
-  AlertTriangle,
+  X,
+  GripVertical,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useProjectStore } from "../../stores/projectStore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
+import { Checkbox } from "../ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -31,12 +41,209 @@ import {
   DialogTitle,
   DialogFooter,
 } from "../ui/dialog";
-import { Card, CardContent } from "../ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
 import { OutputManager } from "../output/OutputManager";
 import { generateId } from "../../lib/utils";
 import { cn } from "../../lib/utils";
-import type { Cue, MediaItem } from "../../types";
+import type { Cue, MediaItem, OutputTarget } from "../../types";
+
+// Sortable table row component
+interface SortableCueRowProps {
+  cue: Cue;
+  isSelected: boolean;
+  onSelect: (checked: boolean) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  videoOutputs: OutputTarget[];
+  audioOutputs: OutputTarget[];
+  onCellClick: (
+    cue: Cue,
+    output: OutputTarget,
+    type: "video" | "audio",
+  ) => void;
+  onCellClear: (cue: Cue, outputId: string) => void;
+  getItemForOutput: (cue: Cue, outputId: string) => MediaItem | undefined;
+}
+
+function SortableCueRow({
+  cue,
+  isSelected,
+  onSelect,
+  onEdit,
+  onDelete,
+  videoOutputs,
+  audioOutputs,
+  onCellClick,
+  onCellClear,
+  getItemForOutput,
+}: SortableCueRowProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: cue.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <TableRow
+      ref={setNodeRef}
+      style={style}
+      data-state={isSelected ? "selected" : undefined}
+      className={cn(isDragging && "opacity-50 bg-muted")}
+    >
+      {/* Drag handle */}
+      <TableCell className="w-8">
+        <div
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing p-1"
+        >
+          <GripVertical className="w-4 h-4 text-muted-foreground" />
+        </div>
+      </TableCell>
+
+      {/* Checkbox */}
+      <TableCell className="w-8">
+        <Checkbox checked={isSelected} onCheckedChange={onSelect} />
+      </TableCell>
+
+      {/* Cue name */}
+      <TableCell className="font-medium">
+        <div
+          className="flex items-center gap-2 cursor-pointer hover:text-primary"
+          onClick={onEdit}
+        >
+          <span>{cue.name}</span>
+          {cue.loop && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+              Loop
+            </span>
+          )}
+          {cue.autoAdvance && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+              Auto
+            </span>
+          )}
+        </div>
+      </TableCell>
+
+      {/* Video output cells */}
+      {videoOutputs.map((output) => {
+        const item = getItemForOutput(cue, output.id);
+        return (
+          <TableCell
+            key={output.id}
+            className={cn(
+              "cursor-pointer transition-colors",
+              item ? "hover:bg-blue-500/10" : "hover:bg-muted/50",
+            )}
+            onClick={() => onCellClick(cue, output, "video")}
+          >
+            {item ? (
+              <div className="flex items-center gap-2 group/cell">
+                <div className="flex items-center gap-2 px-2 py-1 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  <FileVideo className="w-4 h-4 shrink-0" />
+                  <span className="text-sm truncate max-w-[120px]">
+                    {item.name}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 opacity-0 group-hover/cell:opacity-100 shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCellClear(cue, output.id);
+                  }}
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+              </div>
+            ) : (
+              <span className="text-muted-foreground/40">—</span>
+            )}
+          </TableCell>
+        );
+      })}
+
+      {/* Audio output cells */}
+      {audioOutputs.map((output) => {
+        const item = getItemForOutput(cue, output.id);
+        return (
+          <TableCell
+            key={output.id}
+            className={cn(
+              "cursor-pointer transition-colors",
+              item ? "hover:bg-green-500/10" : "hover:bg-muted/50",
+            )}
+            onClick={() => onCellClick(cue, output, "audio")}
+          >
+            {item ? (
+              <div className="flex items-center gap-2 group/cell">
+                <div className="flex items-center gap-2 px-2 py-1 rounded bg-green-500/10 text-green-600 dark:text-green-400">
+                  <FileAudio className="w-4 h-4 shrink-0" />
+                  <span className="text-sm truncate max-w-[120px]">
+                    {item.name}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 opacity-0 group-hover/cell:opacity-100 shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCellClear(cue, output.id);
+                  }}
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+              </div>
+            ) : (
+              <span className="text-muted-foreground/40">—</span>
+            )}
+          </TableCell>
+        );
+      })}
+
+      {/* Actions */}
+      <TableCell className="text-right">
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={onEdit}
+          >
+            <Edit2 className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            onClick={onDelete}
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
 
 export function EditView() {
   const {
@@ -44,18 +251,23 @@ export function EditView() {
     addCue,
     updateCue,
     removeCue,
+    reorderCues,
     addItemToCue,
     updateItem,
     removeItem,
   } = useProjectStore();
 
-  const [selectedCueId, setSelectedCueId] = useState<string | null>(null);
   const [editingCue, setEditingCue] = useState<Cue | null>(null);
-  const [isAddingItem, setIsAddingItem] = useState(false);
+  const [selectedCues, setSelectedCues] = useState<Set<string>>(new Set());
 
-  const selectedCue = project?.cues.find((c) => c.id === selectedCueId);
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
 
-  // Get outputs for video/audio selection
+  // 映像出力と音声出力を分離
   const videoOutputs = project?.outputs.filter((o) => o.type !== "audio") ?? [];
   const audioOutputs = project?.outputs.filter((o) => o.type === "audio") ?? [];
 
@@ -69,7 +281,6 @@ export function EditView() {
       autoAdvance: false,
     };
     addCue(newCue);
-    setSelectedCueId(newCue.id);
   };
 
   const handleEditCue = (cue: Cue) => {
@@ -84,14 +295,53 @@ export function EditView() {
   };
 
   const handleDeleteCue = (id: string) => {
-    if (selectedCueId === id) {
-      setSelectedCueId(null);
-    }
     removeCue(id);
+    setSelectedCues((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   };
 
-  const handleAddMediaItem = async (type: "video" | "audio") => {
-    if (!selectedCueId) return;
+  const handleSelectCue = (cueId: string, checked: boolean) => {
+    setSelectedCues((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(cueId);
+      } else {
+        next.delete(cueId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked && project) {
+      setSelectedCues(new Set(project.cues.map((c) => c.id)));
+    } else {
+      setSelectedCues(new Set());
+    }
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !project) return;
+
+    const oldIndex = project.cues.findIndex((c) => c.id === active.id);
+    const newIndex = project.cues.findIndex((c) => c.id === over.id);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      reorderCues(oldIndex, newIndex);
+    }
+  };
+
+  // セルクリックでファイル選択
+  const handleCellClick = async (
+    cue: Cue,
+    output: OutputTarget,
+    type: "video" | "audio",
+  ) => {
+    const existingItem = cue.items.find((item) => item.outputId === output.id);
 
     const extensions =
       type === "video"
@@ -100,60 +350,55 @@ export function EditView() {
 
     const file = await open({
       multiple: false,
-      filters: [
-        {
-          name: type === "video" ? "Video" : "Audio",
-          extensions,
-        },
-      ],
+      filters: [{ name: type === "video" ? "Video" : "Audio", extensions }],
     });
 
     if (file) {
       const fileName =
         file.split("/").pop() || file.split("\\").pop() || "Untitled";
 
-      // Auto-select first available output of matching type
-      const availableOutputs = type === "video" ? videoOutputs : audioOutputs;
-      const defaultOutputId = availableOutputs[0]?.id ?? "";
-
-      const newItem: MediaItem = {
-        id: generateId(),
-        type,
-        name: fileName,
-        path: file,
-        outputId: defaultOutputId,
-      };
-      addItemToCue(selectedCueId, newItem);
-    }
-    setIsAddingItem(false);
-  };
-
-  const handleDeleteItem = (cueId: string, itemId: string) => {
-    removeItem(cueId, itemId);
-  };
-
-  const handleItemOutputChange = (itemId: string, outputId: string) => {
-    if (selectedCueId) {
-      updateItem(selectedCueId, itemId, { outputId });
+      if (existingItem) {
+        updateItem(cue.id, existingItem.id, { path: file, name: fileName });
+      } else {
+        const newItem: MediaItem = {
+          id: generateId(),
+          type,
+          name: fileName,
+          path: file,
+          outputId: output.id,
+        };
+        addItemToCue(cue.id, newItem);
+      }
     }
   };
 
-  const getOutputIcon = (outputId: string) => {
-    const output = project?.outputs.find((o) => o.id === outputId);
-    if (!output) return null;
-    switch (output.type) {
+  // セルからアイテムを削除
+  const handleCellClear = (cue: Cue, outputId: string) => {
+    const item = cue.items.find((i) => i.outputId === outputId);
+    if (item) {
+      removeItem(cue.id, item.id);
+    }
+  };
+
+  // 特定のCue・出力に対応するMediaItemを取得
+  const getItemForOutput = (
+    cue: Cue,
+    outputId: string,
+  ): MediaItem | undefined => {
+    return cue.items.find((item) => item.outputId === outputId);
+  };
+
+  const getOutputIcon = (type: string) => {
+    switch (type) {
       case "display":
-        return <Monitor className="w-3 h-3" />;
+        return <Monitor className="w-4 h-4" />;
       case "ndi":
-        return <Radio className="w-3 h-3" />;
+        return <Radio className="w-4 h-4" />;
       case "audio":
-        return <Volume2 className="w-3 h-3" />;
+        return <Volume2 className="w-4 h-4" />;
+      default:
+        return null;
     }
-  };
-
-  const getOutputName = (outputId: string) => {
-    const output = project?.outputs.find((o) => o.id === outputId);
-    return output?.name ?? "No output";
   };
 
   if (!project) {
@@ -164,295 +409,142 @@ export function EditView() {
     );
   }
 
+  const hasOutputs = videoOutputs.length > 0 || audioOutputs.length > 0;
+  const allSelected =
+    project.cues.length > 0 && selectedCues.size === project.cues.length;
+  const someSelected = selectedCues.size > 0 && !allSelected;
+
   return (
     <div className="flex h-full">
-      {/* Left Panel - Cue List & Outputs */}
-      <div className="w-1/3 border-r flex flex-col">
-        <Tabs defaultValue="cues" className="flex flex-col h-full">
-          <div className="p-2 border-b bg-muted/30">
-            <TabsList className="w-full">
-              <TabsTrigger value="cues" className="flex-1">
-                Cues
-              </TabsTrigger>
-              <TabsTrigger value="outputs" className="flex-1">
-                <Settings2 className="w-4 h-4 mr-1" />
-                Outputs
-              </TabsTrigger>
-            </TabsList>
+      {/* Main Content - Spreadsheet Table */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {!hasOutputs ? (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <p className="mb-4">No outputs configured.</p>
+              <p className="text-sm">Add outputs in the Outputs panel first.</p>
+            </div>
           </div>
-
-          <TabsContent value="cues" className="flex-1 flex flex-col m-0">
-            <div className="p-2 border-b flex justify-end">
-              <Button size="sm" onClick={handleAddCue}>
-                <Plus className="w-4 h-4 mr-1" />
-                Add Cue
-              </Button>
-            </div>
-
-            <div className="flex-1 overflow-auto">
-              {project.cues.length === 0 ? (
-                <div className="p-4 text-center text-muted-foreground text-sm">
-                  No cues yet. Click "Add Cue" to create one.
-                </div>
-              ) : (
-                <div className="p-2 space-y-1">
-                  {project.cues.map((cue, index) => (
-                    <div
-                      key={cue.id}
-                      className={cn(
-                        "group flex items-center gap-2 p-3 rounded-md cursor-pointer transition-colors",
-                        "hover:bg-muted/50",
-                        selectedCueId === cue.id
-                          ? "bg-primary/10 border border-primary"
-                          : "border border-transparent",
-                      )}
-                      onClick={() => setSelectedCueId(cue.id)}
-                    >
-                      <GripVertical className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
-                      <span className="w-6 text-sm text-muted-foreground">
-                        {index + 1}
-                      </span>
-                      <span className="flex-1 truncate">{cue.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {cue.items.length}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 opacity-0 group-hover:opacity-100"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditCue(cue);
-                        }}
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteCue(cue.id);
-                        }}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="outputs" className="flex-1 overflow-auto p-4 m-0">
-            <OutputManager />
-          </TabsContent>
-        </Tabs>
-      </div>
-
-      {/* Right Panel - Cue Details & Items */}
-      <div className="flex-1 flex flex-col">
-        {selectedCue ? (
+        ) : (
           <>
-            {/* Cue Header */}
-            <div className="p-3 border-b bg-muted/30">
-              <div className="flex items-center justify-between">
-                <h2 className="font-medium">{selectedCue.name}</h2>
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setIsAddingItem(true)}
-                  >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Add Media
-                  </Button>
-                </div>
-              </div>
-              <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={selectedCue.loop}
-                    onChange={(e) =>
-                      updateCue(selectedCue.id, { loop: e.target.checked })
-                    }
-                    className="rounded"
-                  />
-                  Loop
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={selectedCue.autoAdvance}
-                    onChange={(e) =>
-                      updateCue(selectedCue.id, {
-                        autoAdvance: e.target.checked,
-                      })
-                    }
-                    className="rounded"
-                  />
-                  Auto Advance
-                </label>
-              </div>
+            <div className="flex-1 overflow-auto">
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent border-b">
+                      {/* Drag handle column */}
+                      <TableHead className="w-8"></TableHead>
+
+                      {/* Checkbox column */}
+                      <TableHead className="w-8">
+                        <Checkbox
+                          checked={
+                            allSelected ||
+                            (someSelected ? "indeterminate" : false)
+                          }
+                          onCheckedChange={handleSelectAll}
+                        />
+                      </TableHead>
+
+                      {/* Cue name column */}
+                      <TableHead className="min-w-[200px]">Cue</TableHead>
+
+                      {/* Video output columns */}
+                      {videoOutputs.map((output) => (
+                        <TableHead key={output.id} className="min-w-[180px]">
+                          <div className="flex items-center gap-2">
+                            {getOutputIcon(output.type)}
+                            <span>{output.name}</span>
+                          </div>
+                        </TableHead>
+                      ))}
+
+                      {/* Audio output columns */}
+                      {audioOutputs.map((output) => (
+                        <TableHead key={output.id} className="min-w-[180px]">
+                          <div className="flex items-center gap-2">
+                            {getOutputIcon(output.type)}
+                            <span>{output.name}</span>
+                          </div>
+                        </TableHead>
+                      ))}
+
+                      {/* Actions column */}
+                      <TableHead className="w-20 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleAddCue}
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Add Cue
+                        </Button>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {project.cues.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={
+                            videoOutputs.length + audioOutputs.length + 4
+                          }
+                          className="h-32 text-center text-muted-foreground"
+                        >
+                          No cues yet. Click "Add Cue" to create one.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      <SortableContext
+                        items={project.cues.map((c) => c.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        {project.cues.map((cue) => (
+                          <SortableCueRow
+                            key={cue.id}
+                            cue={cue}
+                            isSelected={selectedCues.has(cue.id)}
+                            onSelect={(checked) =>
+                              handleSelectCue(cue.id, checked)
+                            }
+                            onEdit={() => handleEditCue(cue)}
+                            onDelete={() => handleDeleteCue(cue.id)}
+                            videoOutputs={videoOutputs}
+                            audioOutputs={audioOutputs}
+                            onCellClick={handleCellClick}
+                            onCellClear={handleCellClear}
+                            getItemForOutput={getItemForOutput}
+                          />
+                        ))}
+                      </SortableContext>
+                    )}
+                  </TableBody>
+                </Table>
+              </DndContext>
             </div>
 
-            {/* Media Items */}
-            <div className="flex-1 overflow-auto p-4">
-              {selectedCue.items.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                  <p className="mb-4">No media items in this cue.</p>
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsAddingItem(true)}
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Media
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {selectedCue.items.map((item) => {
-                    const availableOutputs =
-                      item.type === "video" ? videoOutputs : audioOutputs;
-
-                    // 同じキュー内で既に使用されている映像出力を取得（自分自身を除く）
-                    const usedVideoOutputIds = selectedCue.items
-                      .filter((i) => i.id !== item.id && i.type === "video")
-                      .map((i) => i.outputId);
-
-                    // この出力が重複しているか
-                    const isDuplicate =
-                      item.type === "video" &&
-                      item.outputId &&
-                      usedVideoOutputIds.includes(item.outputId);
-
-                    return (
-                      <Card
-                        key={item.id}
-                        className={cn(
-                          isDuplicate && "border-yellow-500 bg-yellow-500/5",
-                        )}
-                      >
-                        <CardContent className="p-3">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={cn(
-                                "w-10 h-10 rounded flex items-center justify-center",
-                                item.type === "video"
-                                  ? "bg-blue-500/20 text-blue-500"
-                                  : "bg-green-500/20 text-green-500",
-                              )}
-                            >
-                              {item.type === "video" ? (
-                                <FileVideo className="w-5 h-5" />
-                              ) : (
-                                <FileAudio className="w-5 h-5" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium truncate">
-                                {item.name}
-                              </div>
-                              <div className="text-xs text-muted-foreground truncate">
-                                {item.path}
-                              </div>
-                              {isDuplicate && (
-                                <div className="flex items-center gap-1 text-xs text-yellow-600 mt-1">
-                                  <AlertTriangle className="w-3 h-3" />
-                                  Same display used by another item
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Output Selection */}
-                            <Select
-                              value={item.outputId || ""}
-                              onValueChange={(value) =>
-                                handleItemOutputChange(item.id, value)
-                              }
-                            >
-                              <SelectTrigger
-                                className={cn(
-                                  "w-40",
-                                  isDuplicate && "border-yellow-500",
-                                )}
-                              >
-                                <SelectValue placeholder="Select output">
-                                  {item.outputId ? (
-                                    <span className="flex items-center gap-2">
-                                      {getOutputIcon(item.outputId)}
-                                      {getOutputName(item.outputId)}
-                                    </span>
-                                  ) : (
-                                    "Select output"
-                                  )}
-                                </SelectValue>
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableOutputs.length === 0 ? (
-                                  <div className="px-2 py-1 text-sm text-muted-foreground">
-                                    No{" "}
-                                    {item.type === "video" ? "video" : "audio"}{" "}
-                                    outputs
-                                  </div>
-                                ) : (
-                                  availableOutputs.map((output) => {
-                                    const isUsed =
-                                      item.type === "video" &&
-                                      usedVideoOutputIds.includes(output.id);
-                                    return (
-                                      <SelectItem
-                                        key={output.id}
-                                        value={output.id}
-                                      >
-                                        <span className="flex items-center gap-2">
-                                          {output.type === "display" && (
-                                            <Monitor className="w-4 h-4" />
-                                          )}
-                                          {output.type === "ndi" && (
-                                            <Radio className="w-4 h-4" />
-                                          )}
-                                          {output.type === "audio" && (
-                                            <Volume2 className="w-4 h-4" />
-                                          )}
-                                          {output.name}
-                                          {isUsed && (
-                                            <AlertTriangle className="w-3 h-3 text-yellow-500" />
-                                          )}
-                                        </span>
-                                      </SelectItem>
-                                    );
-                                  })
-                                )}
-                              </SelectContent>
-                            </Select>
-
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive"
-                              onClick={() =>
-                                handleDeleteItem(selectedCue.id, item.id)
-                              }
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
-              )}
+            {/* Footer */}
+            <div className="border-t px-4 py-2 text-sm text-muted-foreground">
+              {selectedCues.size} of {project.cues.length} cue(s) selected.
             </div>
           </>
-        ) : (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
-            Select a cue to edit
-          </div>
         )}
+      </div>
+
+      {/* Right Sidebar - Outputs */}
+      <div className="w-64 border-l flex flex-col">
+        <div className="px-3 py-2 border-b bg-muted/30 flex items-center gap-1.5">
+          <Settings2 className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-sm font-medium">Outputs</span>
+        </div>
+        <div className="flex-1 overflow-auto p-2">
+          <OutputManager />
+        </div>
       </div>
 
       {/* Edit Cue Dialog */}
@@ -475,27 +567,23 @@ export function EditView() {
               </div>
               <div className="flex gap-4">
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={editingCue.loop}
-                    onChange={(e) =>
-                      setEditingCue({ ...editingCue, loop: e.target.checked })
+                    onCheckedChange={(checked) =>
+                      setEditingCue({ ...editingCue, loop: checked as boolean })
                     }
-                    className="rounded"
                   />
                   Loop
                 </label>
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={editingCue.autoAdvance}
-                    onChange={(e) =>
+                    onCheckedChange={(checked) =>
                       setEditingCue({
                         ...editingCue,
-                        autoAdvance: e.target.checked,
+                        autoAdvance: checked as boolean,
                       })
                     }
-                    className="rounded"
                   />
                   Auto Advance
                 </label>
@@ -508,33 +596,6 @@ export function EditView() {
             </Button>
             <Button onClick={handleSaveCue}>Save</Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Media Dialog */}
-      <Dialog open={isAddingItem} onOpenChange={setIsAddingItem}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Media</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-4">
-            <Button
-              variant="outline"
-              className="h-24 flex-col gap-2"
-              onClick={() => handleAddMediaItem("video")}
-            >
-              <FileVideo className="w-8 h-8 text-blue-500" />
-              <span>Video</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-24 flex-col gap-2"
-              onClick={() => handleAddMediaItem("audio")}
-            >
-              <FileAudio className="w-8 h-8 text-green-500" />
-              <span>Audio</span>
-            </Button>
-          </div>
         </DialogContent>
       </Dialog>
     </div>

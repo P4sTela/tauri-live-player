@@ -39,6 +39,9 @@ interface ProjectStore {
 
   // Volume
   setMasterVolume: (value: number) => void;
+
+  // Reorder outputs
+  reorderOutputs: (fromIndex: number, toIndex: number) => void;
 }
 
 // Helper to sync project to Rust backend
@@ -245,6 +248,18 @@ export const useProjectStore = create<ProjectStore>()(
           ? { ...state.project, masterVolume: value }
           : null;
         return { project: newProject };
+      });
+    },
+
+    reorderOutputs: (fromIndex, toIndex) => {
+      set((state) => {
+        if (!state.project) return state;
+        const outputs = [...state.project.outputs];
+        const [removed] = outputs.splice(fromIndex, 1);
+        outputs.splice(toIndex, 0, removed);
+        const newProject = { ...state.project, outputs };
+        syncToBackend(newProject);
+        return { project: newProject, isDirty: true };
       });
     },
   })),
