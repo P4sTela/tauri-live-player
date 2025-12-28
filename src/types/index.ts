@@ -3,13 +3,13 @@
 // ========================================
 export interface MediaItem {
   id: string;
-  type: 'video' | 'audio';
+  type: "video" | "audio";
   name: string;
   path: string;
   outputId: string;
-  offset?: number;        // 開始オフセット（秒）
-  trimStart?: number;     // トリム開始位置
-  trimEnd?: number;       // トリム終了位置
+  offset?: number; // 開始オフセット（秒）
+  trimStart?: number; // トリム開始位置
+  trimEnd?: number; // トリム終了位置
 }
 
 // ========================================
@@ -19,17 +19,23 @@ export interface Cue {
   id: string;
   name: string;
   items: MediaItem[];
-  duration: number;       // 最長アイテムの長さ
+  duration: number; // 最長アイテムの長さ
   loop: boolean;
-  autoAdvance: boolean;   // 終了時に次のキューへ
-  color?: string;         // UI表示用カラー
+  autoAdvance: boolean; // 終了時に次のキューへ
+  color?: string; // UI表示用カラー
 }
 
 // ========================================
 // 出力先の定義
 // ========================================
-export type OutputType = 'display' | 'ndi' | 'audio';
-export type AudioDriver = 'auto' | 'asio' | 'wasapi' | 'coreaudio' | 'jack' | 'alsa';
+export type OutputType = "display" | "ndi" | "audio";
+export type AudioDriver =
+  | "auto"
+  | "asio"
+  | "wasapi"
+  | "coreaudio"
+  | "jack"
+  | "alsa";
 
 export interface OutputTarget {
   id: string;
@@ -37,7 +43,7 @@ export interface OutputTarget {
   type: OutputType;
 
   // 映像出力共通
-  brightness?: number | null;  // null = Masterに連動、number = 個別値
+  brightness?: number | null; // null = Masterに連動、number = 個別値
 
   // Display用
   displayIndex?: number;
@@ -58,7 +64,7 @@ export interface OutputTarget {
 export interface ProjectSettings {
   defaultBrightness: number;
   autoSave: boolean;
-  previewQuality: 'low' | 'medium' | 'high';
+  previewQuality: "low" | "medium" | "high";
 }
 
 // ========================================
@@ -68,6 +74,7 @@ export interface Project {
   id: string;
   name: string;
   masterBrightness: number;
+  masterVolume: number;
   outputs: OutputTarget[];
   cues: Cue[];
   settings: ProjectSettings;
@@ -76,7 +83,13 @@ export interface Project {
 // ========================================
 // プレイヤー状態
 // ========================================
-export type PlayerStatus = 'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'error';
+export type PlayerStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "playing"
+  | "paused"
+  | "error";
 
 export interface PlayerState {
   status: PlayerStatus;

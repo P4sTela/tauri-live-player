@@ -36,6 +36,9 @@ interface ProjectStore {
 
   // Brightness
   setMasterBrightness: (value: number) => void;
+
+  // Volume
+  setMasterVolume: (value: number) => void;
 }
 
 // Helper to sync project to Rust backend
@@ -56,6 +59,8 @@ export const useProjectStore = create<ProjectStore>()(
     loadProject: async (path) => {
       const project = await invoke<Project>("load_project", { path });
       set({ project, isDirty: false, projectPath: path });
+      // Remember last opened project
+      localStorage.setItem("lastProjectPath", path);
     },
 
     saveProject: async (path) => {
@@ -64,6 +69,10 @@ export const useProjectStore = create<ProjectStore>()(
       const savePath = path || projectPath;
       await invoke("save_project", { path: savePath });
       set({ isDirty: false, projectPath: savePath || null });
+      // Remember last saved project
+      if (savePath) {
+        localStorage.setItem("lastProjectPath", savePath);
+      }
     },
 
     newProject: async (name) => {
@@ -225,6 +234,16 @@ export const useProjectStore = create<ProjectStore>()(
           ? { ...state.project, masterBrightness: value }
           : null;
         // Note: set_master_brightness already updates backend, no need to sync full project
+        return { project: newProject };
+      });
+    },
+
+    setMasterVolume: (value) => {
+      invoke("set_master_volume", { value }).catch(console.error);
+      set((state) => {
+        const newProject = state.project
+          ? { ...state.project, masterVolume: value }
+          : null;
         return { project: newProject };
       });
     },

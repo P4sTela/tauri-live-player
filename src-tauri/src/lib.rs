@@ -37,6 +37,7 @@ pub fn run() {
             commands::player::stop,
             commands::player::seek,
             commands::player::set_master_brightness,
+            commands::player::set_master_volume,
             commands::player::set_output_brightness,
             commands::player::get_player_state,
             // Output

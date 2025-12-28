@@ -201,6 +201,22 @@ pub async fn set_output_brightness(
 }
 
 #[tauri::command]
+pub async fn set_master_volume(state: State<'_, AppState>, value: f64) -> Result<(), String> {
+    let mut player_guard = state.player.lock();
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "Player not initialized".to_string())?;
+    player.set_master_volume(value);
+
+    // プロジェクトの値も更新
+    if let Some(project) = state.project.lock().as_mut() {
+        project.master_volume = value;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn get_player_state(state: State<'_, AppState>) -> Result<PlayerState, String> {
     let player_guard = state.player.lock();
 

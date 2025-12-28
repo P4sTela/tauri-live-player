@@ -136,10 +136,16 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub master_brightness: f64,
+    #[serde(default = "default_volume")]
+    pub master_volume: f64,
     pub outputs: Vec<OutputTarget>,
     pub cues: Vec<Cue>,
     #[serde(default)]
     pub settings: ProjectSettings,
+}
+
+fn default_volume() -> f64 {
+    100.0
 }
 
 impl Default for Project {
@@ -148,6 +154,7 @@ impl Default for Project {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Untitled Project".to_string(),
             master_brightness: 100.0,
+            master_volume: 100.0,
             outputs: Vec::new(),
             cues: Vec::new(),
             settings: ProjectSettings::default(),

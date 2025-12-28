@@ -10,6 +10,7 @@ import {
   Radio,
   Volume2,
   Settings2,
+  AlertTriangle,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../../stores/projectStore";
@@ -316,8 +317,24 @@ export function EditView() {
                     const availableOutputs =
                       item.type === "video" ? videoOutputs : audioOutputs;
 
+                    // 同じキュー内で既に使用されている映像出力を取得（自分自身を除く）
+                    const usedVideoOutputIds = selectedCue.items
+                      .filter((i) => i.id !== item.id && i.type === "video")
+                      .map((i) => i.outputId);
+
+                    // この出力が重複しているか
+                    const isDuplicate =
+                      item.type === "video" &&
+                      item.outputId &&
+                      usedVideoOutputIds.includes(item.outputId);
+
                     return (
-                      <Card key={item.id}>
+                      <Card
+                        key={item.id}
+                        className={cn(
+                          isDuplicate && "border-yellow-500 bg-yellow-500/5",
+                        )}
+                      >
                         <CardContent className="p-3">
                           <div className="flex items-center gap-3">
                             <div
@@ -341,6 +358,12 @@ export function EditView() {
                               <div className="text-xs text-muted-foreground truncate">
                                 {item.path}
                               </div>
+                              {isDuplicate && (
+                                <div className="flex items-center gap-1 text-xs text-yellow-600 mt-1">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  Same display used by another item
+                                </div>
+                              )}
                             </div>
 
                             {/* Output Selection */}
@@ -350,7 +373,12 @@ export function EditView() {
                                 handleItemOutputChange(item.id, value)
                               }
                             >
-                              <SelectTrigger className="w-40">
+                              <SelectTrigger
+                                className={cn(
+                                  "w-40",
+                                  isDuplicate && "border-yellow-500",
+                                )}
+                              >
                                 <SelectValue placeholder="Select output">
                                   {item.outputId ? (
                                     <span className="flex items-center gap-2">
@@ -370,25 +398,33 @@ export function EditView() {
                                     outputs
                                   </div>
                                 ) : (
-                                  availableOutputs.map((output) => (
-                                    <SelectItem
-                                      key={output.id}
-                                      value={output.id}
-                                    >
-                                      <span className="flex items-center gap-2">
-                                        {output.type === "display" && (
-                                          <Monitor className="w-4 h-4" />
-                                        )}
-                                        {output.type === "ndi" && (
-                                          <Radio className="w-4 h-4" />
-                                        )}
-                                        {output.type === "audio" && (
-                                          <Volume2 className="w-4 h-4" />
-                                        )}
-                                        {output.name}
-                                      </span>
-                                    </SelectItem>
-                                  ))
+                                  availableOutputs.map((output) => {
+                                    const isUsed =
+                                      item.type === "video" &&
+                                      usedVideoOutputIds.includes(output.id);
+                                    return (
+                                      <SelectItem
+                                        key={output.id}
+                                        value={output.id}
+                                      >
+                                        <span className="flex items-center gap-2">
+                                          {output.type === "display" && (
+                                            <Monitor className="w-4 h-4" />
+                                          )}
+                                          {output.type === "ndi" && (
+                                            <Radio className="w-4 h-4" />
+                                          )}
+                                          {output.type === "audio" && (
+                                            <Volume2 className="w-4 h-4" />
+                                          )}
+                                          {output.name}
+                                          {isUsed && (
+                                            <AlertTriangle className="w-3 h-3 text-yellow-500" />
+                                          )}
+                                        </span>
+                                      </SelectItem>
+                                    );
+                                  })
                                 )}
                               </SelectContent>
                             </Select>

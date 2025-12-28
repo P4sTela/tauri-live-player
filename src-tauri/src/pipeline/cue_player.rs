@@ -20,7 +20,9 @@ pub struct OutputWithMonitor {
 pub struct CuePlayer {
     pipeline: gst::Pipeline,
     video_balances: HashMap<String, gst::Element>,
+    volume_elements: HashMap<String, gst::Element>,
     master_brightness: f64,
+    master_volume: f64,
     output_brightness: HashMap<String, Option<f64>>,
 }
 
@@ -31,7 +33,9 @@ impl CuePlayer {
         Ok(Self {
             pipeline,
             video_balances: HashMap::new(),
+            volume_elements: HashMap::new(),
             master_brightness: 100.0,
+            master_volume: 100.0,
             output_brightness: HashMap::new(),
         })
     }
@@ -61,6 +65,7 @@ impl CuePlayer {
             let _ = self.pipeline.remove(&element);
         }
         self.video_balances.clear();
+        self.volume_elements.clear();
 
         // 出力とモニター情報、ネイティブハンドルを組み合わせ
         println!(
@@ -137,7 +142,20 @@ impl CuePlayer {
             }
         }
 
+        // 現在のmaster_volumeを適用（volume要素は初期値1.0で作成されるため）
+        self.apply_master_volume();
+
         Ok(())
+    }
+
+    /// 現在のmaster_volumeを全てのvolume要素に適用
+    fn apply_master_volume(&self) {
+        let gst_volume = self.master_volume / 100.0;
+        for element in self.pipeline.iterate_elements().into_iter().flatten() {
+            if element.name().starts_with("volume_") {
+                element.set_property("volume", gst_volume);
+            }
+        }
     }
 
     fn add_media_item(&mut self, item: &MediaItem, owm: &OutputWithMonitor) -> AppResult<()> {
@@ -235,16 +253,30 @@ impl CuePlayer {
                     Err(_) => return,
                 };
 
+                // Volume element with unique name for later access
+                let volume_name = format!("volume_{}", owm_clone.output.id);
+                let volume = match gst::ElementFactory::make("volume")
+                    .name(&volume_name)
+                    .property("volume", 1.0_f64)
+                    .build()
+                {
+                    Ok(e) => e,
+                    Err(_) => return,
+                };
+
                 let sink = match create_audio_sink(&owm_clone.output) {
                     Ok(s) => s,
                     Err(_) => return,
                 };
 
-                if pipeline.add_many([&convert, &resample, &sink]).is_err() {
+                if pipeline
+                    .add_many([&convert, &resample, &volume, &sink])
+                    .is_err()
+                {
                     return;
                 }
 
-                if gst::Element::link_many([&convert, &resample, &sink]).is_err() {
+                if gst::Element::link_many([&convert, &resample, &volume, &sink]).is_err() {
                     return;
                 }
 
@@ -259,6 +291,7 @@ impl CuePlayer {
 
                 let _ = convert.sync_state_with_parent();
                 let _ = resample.sync_state_with_parent();
+                let _ = volume.sync_state_with_parent();
                 let _ = sink.sync_state_with_parent();
             }
         });
@@ -300,8 +333,10 @@ impl CuePlayer {
 
     pub fn seek(&self, position_secs: f64) -> AppResult<()> {
         let position = gst::ClockTime::from_seconds_f64(position_secs);
+        // ACCURATE: キーフレームではなく正確な位置にシーク（複数動画の同期のため）
+        // KEY_UNITだと動画ごとにキーフレーム位置が異なり同期がずれる
         self.pipeline
-            .seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, position)
+            .seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE, position)
             .map_err(|e| AppError::Pipeline(format!("Failed to seek: {:?}", e)))?;
         Ok(())
     }
@@ -335,6 +370,21 @@ impl CuePlayer {
             let gst_brightness = (effective / 100.0) - 1.0;
             balance.set_property("brightness", gst_brightness);
         }
+    }
+
+    // ========================================
+    // 音量調整
+    // ========================================
+
+    /// Set master volume (0-100)
+    pub fn set_master_volume(&mut self, value: f64) {
+        self.master_volume = value;
+        self.apply_master_volume();
+    }
+
+    /// Get current master volume (0-100)
+    pub fn master_volume(&self) -> f64 {
+        self.master_volume
     }
 
     // ========================================

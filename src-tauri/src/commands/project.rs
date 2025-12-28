@@ -39,6 +39,7 @@ pub async fn new_project(state: State<'_, AppState>, name: String) -> Result<Pro
         id: uuid::Uuid::new_v4().to_string(),
         name,
         master_brightness: 100.0,
+        master_volume: 100.0,
         outputs: Vec::new(),
         cues: Vec::new(),
         settings: ProjectSettings::default(),
