@@ -1,0 +1,32 @@
+# NDI SDK パス設定（OS別）
+
+# macOS (Apple Silicon & Intel)
+[target.aarch64-apple-darwin]
+rustflags = []
+
+[target.aarch64-apple-darwin.env]
+NDI_SDK_DIR = "/Library/NDI SDK for Apple"
+
+[target.x86_64-apple-darwin]
+rustflags = []
+
+[target.x86_64-apple-darwin.env]
+NDI_SDK_DIR = "/Library/NDI SDK for Apple"
+
+# Windows
+[target.x86_64-pc-windows-msvc]
+rustflags = []
+
+[target.x86_64-pc-windows-msvc.env]
+NDI_SDK_DIR = "C:\\Program Files\\NDI\\NDI 6 SDK"
+
+# Linux
+[target.x86_64-unknown-linux-gnu]
+rustflags = []
+
+[target.x86_64-unknown-linux-gnu.env]
+NDI_SDK_DIR = "/usr/share/NDI SDK for Linux"
+
+# デフォルト（ホストOSのターゲットが上記にマッチしない場合）
+[env]
+NDI_SDK_DIR = { value = "/Library/NDI SDK for Apple", force = false }
