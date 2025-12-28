@@ -1,3 +1,8 @@
+// 開発中は未使用の警告を抑制
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 mod audio;
 mod commands;
 mod error;
@@ -8,9 +13,53 @@ mod types;
 
 use state::AppState;
 use tauri::Manager;
+use tracing::{info, warn};
+use tracing_subscriber::{fmt, EnvFilter};
+
+/// Initialize tracing/logging
+fn init_logging() {
+    // RUST_LOG env controls log level: error, warn, info, debug, trace
+    // Example: RUST_LOG=tauri_live_player=debug,gstreamer=warn
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
+
+    fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_file(false)
+        .with_line_number(false)
+        .init();
+}
+
+/// Set up NDI SDK library path for macOS
+#[cfg(target_os = "macos")]
+fn setup_ndi_library_path() {
+    use std::env;
+
+    // NDI SDK library is typically installed at /usr/local/lib
+    // GStreamer NDI plugin uses NDI_RUNTIME_DIR_V6 to find the SDK
+    let ndi_lib_path = "/usr/local/lib";
+
+    // Set NDI_RUNTIME_DIR_V6 for GStreamer NDI plugin
+    if env::var("NDI_RUNTIME_DIR_V6").is_err() {
+        env::set_var("NDI_RUNTIME_DIR_V6", ndi_lib_path);
+        info!(path = %ndi_lib_path, "Set NDI_RUNTIME_DIR_V6 for GStreamer NDI plugin");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn setup_ndi_library_path() {
+    // On Windows/Linux, NDI SDK is typically in system path or needs different handling
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize logging first
+    init_logging();
+
+    // Set up NDI library path before GStreamer initialization
+    setup_ndi_library_path();
+
     let app_state = AppState::new();
 
     tauri::Builder::default()

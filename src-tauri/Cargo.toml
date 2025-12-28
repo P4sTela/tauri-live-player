@@ -34,6 +34,10 @@ thiserror = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 parking_lot = "0.12"
 
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 # Window handle for GStreamer sink
 raw-window-handle = "0.6"
 
@@ -43,6 +47,9 @@ gstreamer-video = "0.23"
 gstreamer-audio = "0.23"
 gstreamer-app = "0.23"
 gstreamer-pbutils = "0.23"
+
+# NDI SDK (appsink方式での送信用)
+grafton-ndi = { version = "0.9", features = ["advanced_sdk"] }
 
 [target.'cfg(windows)'.dependencies]
 # Windows-specific dependencies (if needed)

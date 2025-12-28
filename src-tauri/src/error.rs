@@ -23,6 +23,9 @@ pub enum AppError {
     #[error("Invalid state: {0}")]
     InvalidState(String),
 
+    #[error("NDI error: {0}")]
+    Ndi(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
