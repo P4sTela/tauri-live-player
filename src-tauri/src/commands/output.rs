@@ -35,7 +35,7 @@ pub async fn open_output_window(
 
         let mut standby = state.standby_manager.lock();
         if let Err(e) = standby.create_standby(&config.id, &config.name, &handle, width, height) {
-            println!("[Output] Failed to create standby pipeline: {:?}", e);
+            tracing::warn!("[Output] Failed to create standby pipeline: {:?}", e);
             // Non-fatal, continue without standby
         }
     }

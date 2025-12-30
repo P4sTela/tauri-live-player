@@ -4,7 +4,7 @@
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
-use std::sync::{Arc, Mutex};
+use tracing::{debug, info};
 
 use super::native_handle::{create_video_sink_with_handle, NativeHandle};
 
@@ -65,7 +65,7 @@ impl StandbyPipeline {
         pipeline.add_many([&src, &capsfilter, &textoverlay, &sink])?;
         gst::Element::link_many([&src, &capsfilter, &textoverlay, &sink])?;
 
-        println!(
+        debug!(
             "[StandbyPipeline] Created for '{}' at {}x{}",
             output_name, width, height
         );
@@ -83,7 +83,7 @@ impl StandbyPipeline {
         self.pipeline
             .set_state(gst::State::Playing)
             .map_err(|_| gst::glib::bool_error!("Failed to start standby pipeline"))?;
-        println!("[StandbyPipeline] Started for '{}'", self.output_name);
+        info!("[StandbyPipeline] Started for '{}'", self.output_name);
         Ok(())
     }
 
@@ -92,7 +92,7 @@ impl StandbyPipeline {
         self.pipeline
             .set_state(gst::State::Null)
             .map_err(|_| gst::glib::bool_error!("Failed to stop standby pipeline"))?;
-        println!("[StandbyPipeline] Stopped for '{}'", self.output_name);
+        info!("[StandbyPipeline] Stopped for '{}'", self.output_name);
         Ok(())
     }
 

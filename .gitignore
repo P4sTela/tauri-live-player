@@ -25,4 +25,5 @@ dist-ssr
 
 .serena/
 .zed/
-*.json
+
+*Project.json

@@ -34,19 +34,3 @@ export function formatTimeLong(seconds: number): string {
 export function generateId(): string {
   return crypto.randomUUID();
 }
-
-/**
- * ファイルパスからファイル名を取得
- */
-export function getFileName(path: string): string {
-  return path.split(/[/\\]/).pop() || path;
-}
-
-/**
- * ファイル拡張子からメディアタイプを判定
- */
-export function getMediaType(path: string): "video" | "audio" {
-  const ext = path.split(".").pop()?.toLowerCase();
-  const audioExtensions = ["wav", "mp3", "flac", "aac", "ogg", "m4a", "aiff"];
-  return audioExtensions.includes(ext || "") ? "audio" : "video";
-}

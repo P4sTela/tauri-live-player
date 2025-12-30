@@ -6,6 +6,7 @@
 use gstreamer as gst;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::WebviewWindow;
+use tracing::{debug, warn};
 
 /// Platform-agnostic native window handle
 #[derive(Debug, Clone)]
@@ -34,33 +35,33 @@ pub fn get_native_handle(window: &WebviewWindow) -> Option<NativeHandle> {
         #[cfg(target_os = "macos")]
         RawWindowHandle::AppKit(appkit) => {
             let ns_view = appkit.ns_view.as_ptr() as u64;
-            println!("[NativeHandle] macOS NSView handle: 0x{:x}", ns_view);
+            debug!("[NativeHandle] macOS NSView handle: 0x{:x}", ns_view);
             Some(NativeHandle::NSView(ns_view))
         }
 
         #[cfg(target_os = "windows")]
         RawWindowHandle::Win32(win32) => {
             let hwnd = win32.hwnd.get() as isize;
-            println!("[NativeHandle] Windows HWND handle: 0x{:x}", hwnd);
+            debug!("[NativeHandle] Windows HWND handle: 0x{:x}", hwnd);
             Some(NativeHandle::Hwnd(hwnd))
         }
 
         #[cfg(target_os = "linux")]
         RawWindowHandle::Xlib(xlib) => {
             let window_id = xlib.window;
-            println!("[NativeHandle] Linux X11 window ID: {}", window_id);
+            debug!("[NativeHandle] Linux X11 window ID: {}", window_id);
             Some(NativeHandle::X11Window(window_id as u64))
         }
 
         #[cfg(target_os = "linux")]
         RawWindowHandle::Xcb(xcb) => {
             let window_id = xcb.window.get();
-            println!("[NativeHandle] Linux XCB window ID: {}", window_id);
+            debug!("[NativeHandle] Linux XCB window ID: {}", window_id);
             Some(NativeHandle::X11Window(window_id as u64))
         }
 
         _ => {
-            println!("[NativeHandle] Unsupported window handle type");
+            warn!("[NativeHandle] Unsupported window handle type");
             None
         }
     }
@@ -94,7 +95,7 @@ fn create_macos_sink(ns_view: u64) -> Result<gst::Element, gst::glib::BoolError>
         // Note: glimagesink on macOS expects the window-handle property
         // to be set via the GstVideoOverlay interface
         set_window_handle_overlay(&sink, ns_view);
-        println!(
+        debug!(
             "[NativeHandle] Created glimagesink for macOS with handle 0x{:x}",
             ns_view
         );
@@ -104,7 +105,7 @@ fn create_macos_sink(ns_view: u64) -> Result<gst::Element, gst::glib::BoolError>
     // Fallback to osxvideosink
     if let Ok(sink) = gst::ElementFactory::make("osxvideosink").build() {
         set_window_handle_overlay(&sink, ns_view);
-        println!(
+        debug!(
             "[NativeHandle] Created osxvideosink for macOS with handle 0x{:x}",
             ns_view
         );
@@ -121,7 +122,7 @@ fn create_windows_sink(hwnd: isize) -> Result<gst::Element, gst::glib::BoolError
     // Try d3d11videosink first (Direct3D 11, best performance on Windows)
     if let Ok(sink) = gst::ElementFactory::make("d3d11videosink").build() {
         set_window_handle_overlay(&sink, hwnd as u64);
-        println!(
+        debug!(
             "[NativeHandle] Created d3d11videosink for Windows with HWND 0x{:x}",
             hwnd
         );
@@ -131,7 +132,7 @@ fn create_windows_sink(hwnd: isize) -> Result<gst::Element, gst::glib::BoolError
     // Fallback to d3dvideosink (Direct3D 9)
     if let Ok(sink) = gst::ElementFactory::make("d3dvideosink").build() {
         set_window_handle_overlay(&sink, hwnd as u64);
-        println!(
+        debug!(
             "[NativeHandle] Created d3dvideosink for Windows with HWND 0x{:x}",
             hwnd
         );
@@ -141,7 +142,7 @@ fn create_windows_sink(hwnd: isize) -> Result<gst::Element, gst::glib::BoolError
     // Fallback to glimagesink
     if let Ok(sink) = gst::ElementFactory::make("glimagesink").build() {
         set_window_handle_overlay(&sink, hwnd as u64);
-        println!(
+        debug!(
             "[NativeHandle] Created glimagesink for Windows with HWND 0x{:x}",
             hwnd
         );
@@ -158,7 +159,7 @@ fn create_linux_sink(window_id: u64) -> Result<gst::Element, gst::glib::BoolErro
     // Try glimagesink first
     if let Ok(sink) = gst::ElementFactory::make("glimagesink").build() {
         set_window_handle_overlay(&sink, window_id);
-        println!(
+        debug!(
             "[NativeHandle] Created glimagesink for Linux with window ID {}",
             window_id
         );
@@ -168,7 +169,7 @@ fn create_linux_sink(window_id: u64) -> Result<gst::Element, gst::glib::BoolErro
     // Fallback to xvimagesink
     if let Ok(sink) = gst::ElementFactory::make("xvimagesink").build() {
         set_window_handle_overlay(&sink, window_id);
-        println!(
+        debug!(
             "[NativeHandle] Created xvimagesink for Linux with window ID {}",
             window_id
         );
@@ -178,7 +179,7 @@ fn create_linux_sink(window_id: u64) -> Result<gst::Element, gst::glib::BoolErro
     // Fallback to ximagesink
     if let Ok(sink) = gst::ElementFactory::make("ximagesink").build() {
         set_window_handle_overlay(&sink, window_id);
-        println!(
+        debug!(
             "[NativeHandle] Created ximagesink for Linux with window ID {}",
             window_id
         );
@@ -199,7 +200,7 @@ fn set_window_handle_overlay(element: &gst::Element, handle: u64) {
         unsafe {
             overlay.set_window_handle(handle as usize);
         }
-        println!(
+        debug!(
             "[NativeHandle] Set window handle via VideoOverlay: 0x{:x}",
             handle
         );
@@ -207,19 +208,19 @@ fn set_window_handle_overlay(element: &gst::Element, handle: u64) {
         // Some sinks might use a property instead
         if element.has_property("window-handle", None) {
             element.set_property("window-handle", handle);
-            println!(
+            debug!(
                 "[NativeHandle] Set window handle via property: 0x{:x}",
                 handle
             );
         } else {
-            println!("[NativeHandle] Warning: Could not set window handle on element");
+            warn!("[NativeHandle] Could not set window handle on element");
         }
     }
 }
 
 /// Create a fallback video sink (autovideosink) when native handle is not available
 pub fn create_fallback_sink() -> Result<gst::Element, gst::glib::BoolError> {
-    println!("[NativeHandle] Creating fallback autovideosink");
+    debug!("[NativeHandle] Creating fallback autovideosink");
     gst::ElementFactory::make("autovideosink").build()
 }
 

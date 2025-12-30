@@ -80,7 +80,7 @@ pub async fn load_cue(
     let native_handles: HashMap<String, NativeHandle> = {
         let output_manager = state.output_manager.lock();
         let open_ids = output_manager.get_open_output_ids();
-        println!(
+        tracing::debug!(
             "[load_cue] Open output IDs in OutputManager: {:?}",
             open_ids
         );
@@ -94,7 +94,7 @@ pub async fn load_cue(
             })
             .collect();
 
-        println!(
+        tracing::debug!(
             "[load_cue] Native handles collected: {:?}",
             handles.keys().collect::<Vec<_>>()
         );

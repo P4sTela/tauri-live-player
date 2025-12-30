@@ -14,7 +14,9 @@
       {
         "title": "tauri-live-player",
         "width": 1280,
-        "height": 720
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 600
       }
     ],
     "security": {

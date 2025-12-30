@@ -1,8 +1,3 @@
-// 開発中は未使用の警告を抑制
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-
 mod audio;
 mod commands;
 mod error;
@@ -13,7 +8,7 @@ mod types;
 
 use state::AppState;
 use tauri::Manager;
-use tracing::{info, warn};
+use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
 /// Initialize tracing/logging
@@ -71,9 +66,9 @@ pub fn run() {
             // GStreamer初期化
             let state = app.state::<AppState>();
             if let Err(e) = state.init_player() {
-                eprintln!("Failed to initialize GStreamer: {:?}", e);
+                tracing::error!("Failed to initialize GStreamer: {:?}", e);
             } else {
-                println!("GStreamer initialized successfully");
+                info!("GStreamer initialized successfully");
             }
             Ok(())
         })

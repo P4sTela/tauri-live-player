@@ -3,7 +3,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { usePlayerStore } from "../../stores/playerStore";
 import { Button } from "../ui/button";
 import { Slider } from "../ui/slider";
-import { cn } from "../../lib/utils";
+import { cn, formatTime } from "../../lib/utils";
 
 export function PlayView() {
   const { project } = useProjectStore();
@@ -22,12 +22,6 @@ export function PlayView() {
   } = usePlayerStore();
 
   const isPlaying = status === "playing";
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
 
   const handleCueSelect = async (index: number) => {
     await loadCue(index);
@@ -72,7 +66,7 @@ export function PlayView() {
                   "hover:bg-muted/50",
                   index === currentCueIndex
                     ? "bg-primary/10 border-2 border-primary"
-                    : "bg-muted/30 border-2 border-transparent"
+                    : "bg-muted/30 border-2 border-transparent",
                 )}
                 onClick={() => handleCueSelect(index)}
                 onDoubleClick={() => handleCuePlay(index)}
@@ -83,7 +77,7 @@ export function PlayView() {
                     "w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold",
                     index === currentCueIndex
                       ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
+                      : "bg-muted text-muted-foreground",
                   )}
                 >
                   {index + 1}
@@ -137,11 +131,7 @@ export function PlayView() {
             <SkipBack className="w-6 h-6" />
           </Button>
 
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={stop}
-          >
+          <Button variant="outline" size="lg" onClick={stop}>
             <Square className="w-6 h-6" />
           </Button>
 

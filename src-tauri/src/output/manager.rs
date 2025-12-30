@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tracing::{debug, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::types::*;
@@ -43,7 +44,7 @@ impl OutputManager {
 
                 let window = if let Some(m) = monitor {
                     // Fullscreen mode: position on specific monitor
-                    println!(
+                    debug!(
                         "[OutputManager] Creating fullscreen window on monitor {} ({}, {})",
                         m.index, m.width, m.height
                     );
@@ -62,7 +63,7 @@ impl OutputManager {
                     .map_err(|e| AppError::Output(format!("Failed to create window: {:?}", e)))?
                 } else {
                     // Windowed mode: normal resizable window
-                    println!("[OutputManager] Creating windowed output (not fullscreen)");
+                    debug!("[OutputManager] Creating windowed output (not fullscreen)");
                     WebviewWindowBuilder::new(
                         app,
                         format!("output_{}", config.id),
@@ -83,13 +84,13 @@ impl OutputManager {
                 let monitor_index = monitor.map(|m| m.index);
 
                 if native_handle.is_some() {
-                    println!(
+                    debug!(
                         "[OutputManager] Created output window '{}' (fullscreen={}, monitor={:?}) with native handle",
                         config.name, is_fullscreen, monitor_index
                     );
                 } else {
-                    println!(
-                        "[OutputManager] Warning: Could not get native handle for output '{}'",
+                    warn!(
+                        "[OutputManager] Could not get native handle for output '{}'",
                         config.name
                     );
                 }
