@@ -11,6 +11,8 @@ import {
   AppWindow,
   ChevronDown,
   GripVertical,
+  Share2,
+  Layers,
 } from "lucide-react";
 import {
   DndContext,
@@ -64,16 +66,20 @@ import type {
   MonitorInfo,
 } from "../../types";
 
-const OUTPUT_TYPE_ICONS = {
+const OUTPUT_TYPE_ICONS: Record<OutputType, typeof Monitor> = {
   display: Monitor,
   ndi: Radio,
   audio: Volume2,
+  syphon: Share2,
+  spout: Layers,
 };
 
-const OUTPUT_TYPE_LABELS = {
+const OUTPUT_TYPE_LABELS: Record<OutputType, string> = {
   display: "Display",
   ndi: "NDI",
   audio: "Audio",
+  syphon: "Syphon",
+  spout: "Spout",
 };
 
 // Sortable output item component
@@ -142,6 +148,8 @@ function SortableOutputItem({
           output.type === "display" && "bg-blue-500/20 text-blue-500",
           output.type === "ndi" && "bg-purple-500/20 text-purple-500",
           output.type === "audio" && "bg-green-500/20 text-green-500",
+          output.type === "syphon" && "bg-orange-500/20 text-orange-500",
+          output.type === "spout" && "bg-cyan-500/20 text-cyan-500",
         )}
       >
         <Icon className="w-3.5 h-3.5" />
@@ -161,6 +169,8 @@ function SortableOutputItem({
             <>Display {output.displayIndex ?? 0}</>
           )}
           {output.type === "ndi" && output.ndiName}
+          {output.type === "syphon" && (output.syphonName || "TauriLivePlayer")}
+          {output.type === "spout" && (output.spoutName || "TauriLivePlayer")}
           {output.type === "audio" && (output.audioDriver || "auto")}
         </div>
       </div>
@@ -205,8 +215,10 @@ function SortableOutputItem({
           </DropdownMenu>
         ))}
 
-      {/* NDI indicator - auto-enabled when cue plays */}
-      {output.type === "ndi" && (
+      {/* NDI/Syphon/Spout indicator - auto-enabled when cue plays */}
+      {(output.type === "ndi" ||
+        output.type === "syphon" ||
+        output.type === "spout") && (
         <span className="text-xs text-muted-foreground px-2">Auto</span>
       )}
 
@@ -276,6 +288,8 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
       brightness: null,
       ...(type === "display" && { displayIndex: 0, fullscreen: true }),
       ...(type === "ndi" && { ndiName: `LivePlayer_${count}` }),
+      ...(type === "syphon" && { syphonName: `LivePlayer_${count}` }),
+      ...(type === "spout" && { spoutName: `LivePlayer_${count}` }),
       ...(type === "audio" && { audioDriver: "auto" as AudioDriver }),
     };
     addOutput(newOutput);
@@ -453,6 +467,22 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
               <Volume2 className="w-5 h-5 text-green-500" />
               Audio
             </Button>
+            <Button
+              variant="outline"
+              className="h-16 flex-col gap-1 text-xs"
+              onClick={() => handleAddOutput("syphon")}
+            >
+              <Share2 className="w-5 h-5 text-orange-500" />
+              Syphon
+            </Button>
+            <Button
+              variant="outline"
+              className="h-16 flex-col gap-1 text-xs"
+              onClick={() => handleAddOutput("spout")}
+            >
+              <Layers className="w-5 h-5 text-cyan-500" />
+              Spout
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -500,6 +530,12 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
                       ...(value === "ndi" && {
                         ndiName: editingOutput.ndiName ?? "LivePlayer",
                       }),
+                      ...(value === "syphon" && {
+                        syphonName: editingOutput.syphonName ?? "LivePlayer",
+                      }),
+                      ...(value === "spout" && {
+                        spoutName: editingOutput.spoutName ?? "LivePlayer",
+                      }),
                       ...(value === "audio" && {
                         audioDriver: editingOutput.audioDriver ?? "auto",
                       }),
@@ -526,6 +562,18 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
                       <div className="flex items-center gap-2">
                         <Volume2 className="w-4 h-4 text-green-500" />
                         Audio
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="syphon">
+                      <div className="flex items-center gap-2">
+                        <Share2 className="w-4 h-4 text-orange-500" />
+                        Syphon (macOS)
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="spout">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-cyan-500" />
+                        Spout (Windows)
                       </div>
                     </SelectItem>
                   </SelectContent>
@@ -602,6 +650,50 @@ export function OutputManager({ compact = false }: OutputManagerProps) {
                     }
                     className="h-8"
                   />
+                </div>
+              )}
+
+              {editingOutput.type === "syphon" && (
+                <div className="space-y-1">
+                  <Label htmlFor="syphon-name" className="text-xs">
+                    Syphon Server Name
+                  </Label>
+                  <Input
+                    id="syphon-name"
+                    value={editingOutput.syphonName ?? ""}
+                    onChange={(e) =>
+                      setEditingOutput({
+                        ...editingOutput,
+                        syphonName: e.target.value,
+                      })
+                    }
+                    className="h-8"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Other apps will see this name when receiving Syphon frames
+                  </p>
+                </div>
+              )}
+
+              {editingOutput.type === "spout" && (
+                <div className="space-y-1">
+                  <Label htmlFor="spout-name" className="text-xs">
+                    Spout Sender Name
+                  </Label>
+                  <Input
+                    id="spout-name"
+                    value={editingOutput.spoutName ?? ""}
+                    onChange={(e) =>
+                      setEditingOutput({
+                        ...editingOutput,
+                        spoutName: e.target.value,
+                      })
+                    }
+                    className="h-8"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Other apps will see this name when receiving Spout frames
+                  </p>
                 </div>
               )}
 

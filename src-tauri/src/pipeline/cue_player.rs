@@ -13,6 +13,8 @@ use crate::error::{AppError, AppResult};
 use crate::output::native_handle::NativeHandle;
 use crate::pipeline::media_handler;
 use crate::pipeline::NdiSender;
+#[cfg(target_os = "macos")]
+use crate::pipeline::SyphonSender;
 use crate::types::*;
 
 /// 出力先とモニター情報、ネイティブハンドルを組み合わせた構造体
@@ -34,6 +36,12 @@ pub struct CuePlayer {
     ndi_senders: HashMap<String, Arc<NdiSender>>,
     /// NDI出力用のappsink (output_id -> AppSink)
     ndi_appsinks: HashMap<String, gst_app::AppSink>,
+    /// Syphon出力用のSyphonSender (output_id -> SyphonSender)
+    #[cfg(target_os = "macos")]
+    syphon_senders: HashMap<String, Arc<SyphonSender>>,
+    /// Syphon出力用のappsink (output_id -> AppSink)
+    #[cfg(target_os = "macos")]
+    syphon_appsinks: HashMap<String, gst_app::AppSink>,
     master_brightness: f64,
     master_volume: f64,
     output_brightness: HashMap<String, Option<f64>>,
@@ -49,6 +57,10 @@ impl CuePlayer {
             volume_elements: HashMap::new(),
             ndi_senders: HashMap::new(),
             ndi_appsinks: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            syphon_senders: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            syphon_appsinks: HashMap::new(),
             master_brightness: 100.0,
             master_volume: 100.0,
             output_brightness: HashMap::new(),
@@ -75,6 +87,14 @@ impl CuePlayer {
             }
         }
 
+        // Syphon出力用のSyphonSenderを作成 (macOSのみ)
+        #[cfg(target_os = "macos")]
+        for owm in &outputs_with_monitors {
+            if owm.output.output_type == OutputType::Syphon {
+                self.setup_syphon_sender(owm)?;
+            }
+        }
+
         // 各メディアアイテムを追加
         for item in &cue.items {
             let owm = outputs_with_monitors
@@ -85,10 +105,14 @@ impl CuePlayer {
                 })?;
 
             let brightness = self.get_effective_brightness(&owm.output.id);
-            let appsink_weak = if owm.output.output_type == OutputType::Ndi {
-                self.ndi_appsinks.get(&owm.output.id).map(|a| a.downgrade())
-            } else {
-                None
+            let appsink_weak = match owm.output.output_type {
+                OutputType::Ndi => self.ndi_appsinks.get(&owm.output.id).map(|a| a.downgrade()),
+                #[cfg(target_os = "macos")]
+                OutputType::Syphon => self
+                    .syphon_appsinks
+                    .get(&owm.output.id)
+                    .map(|a| a.downgrade()),
+                _ => None,
             };
 
             media_handler::add_media_item(&self.pipeline, item, owm, brightness, appsink_weak)?;
@@ -116,6 +140,11 @@ impl CuePlayer {
         self.volume_elements.clear();
         self.ndi_senders.clear();
         self.ndi_appsinks.clear();
+        #[cfg(target_os = "macos")]
+        {
+            self.syphon_senders.clear();
+            self.syphon_appsinks.clear();
+        }
 
         Ok(())
     }
@@ -202,11 +231,56 @@ impl CuePlayer {
         Ok(())
     }
 
+    /// Syphon出力用のSyphonSenderとappsinkを作成 (macOSのみ)
+    #[cfg(target_os = "macos")]
+    fn setup_syphon_sender(&mut self, owm: &OutputWithMonitor) -> AppResult<()> {
+        let output_id = &owm.output.id;
+        let syphon_name = owm
+            .output
+            .syphon_name
+            .as_deref()
+            .unwrap_or("TauriLivePlayer");
+
+        debug!(
+            "[CuePlayer] Setting up Syphon sender for '{}' (syphon-name='{}')",
+            owm.output.name, syphon_name
+        );
+
+        // SyphonSenderを作成
+        let mut syphon_sender = SyphonSender::new(syphon_name)?;
+
+        // appsinkを作成（SyphonSenderが内部でコールバックを設定）
+        let appsink_element = syphon_sender.create_appsink()?;
+        let appsink = appsink_element
+            .downcast::<gst_app::AppSink>()
+            .map_err(|_| AppError::Pipeline("Failed to downcast to AppSink".to_string()))?;
+
+        // appsinkをパイプラインに追加
+        self.pipeline.add(&appsink).map_err(|e| {
+            AppError::Pipeline(format!("Failed to add appsink to pipeline: {:?}", e))
+        })?;
+
+        // SyphonSenderとappsinkを保存
+        self.syphon_senders
+            .insert(output_id.clone(), Arc::new(syphon_sender));
+        self.syphon_appsinks.insert(output_id.clone(), appsink);
+
+        debug!(
+            "[CuePlayer] Syphon sender created for '{}' (appsink方式)",
+            owm.output.name
+        );
+
+        Ok(())
+    }
+
     /// ライブ出力がある場合のパイプライン設定
     fn configure_live_mode(&self, outputs_with_monitors: &[OutputWithMonitor]) {
-        let has_live_output = outputs_with_monitors
-            .iter()
-            .any(|owm| matches!(owm.output.output_type, OutputType::Ndi));
+        let has_live_output = outputs_with_monitors.iter().any(|owm| {
+            matches!(
+                owm.output.output_type,
+                OutputType::Ndi | OutputType::Syphon | OutputType::Spout
+            )
+        });
 
         if has_live_output {
             let latency = gst::ClockTime::from_mseconds(100);
@@ -487,6 +561,15 @@ impl CuePlayer {
         // NDI出力がある場合は、NdiSenderのPTSを使用
         if let Some(ndi_sender) = self.ndi_senders.values().next() {
             let pos = ndi_sender.last_position();
+            if pos > 0.0 {
+                return Some(pos);
+            }
+        }
+
+        // Syphon出力がある場合は、SyphonSenderのPTSを使用
+        #[cfg(target_os = "macos")]
+        if let Some(syphon_sender) = self.syphon_senders.values().next() {
+            let pos = syphon_sender.last_position();
             if pos > 0.0 {
                 return Some(pos);
             }

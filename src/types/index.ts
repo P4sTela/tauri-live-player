@@ -28,7 +28,7 @@ export interface Cue {
 // ========================================
 // 出力先の定義
 // ========================================
-export type OutputType = "display" | "ndi" | "audio";
+export type OutputType = "display" | "ndi" | "audio" | "syphon" | "spout";
 export type AudioDriver =
   | "auto"
   | "asio"
@@ -51,6 +51,12 @@ export interface OutputTarget {
 
   // NDI用
   ndiName?: string;
+
+  // Syphon用 (macOS)
+  syphonName?: string;
+
+  // Spout用 (Windows)
+  spoutName?: string;
 
   // Audio用
   audioDriver?: AudioDriver;

@@ -50,6 +50,8 @@ pub async fn play_test_video(
         display_index: Some(0),
         fullscreen: Some(false),
         ndi_name: None,
+        syphon_name: None,
+        spout_name: None,
         audio_driver: None,
         audio_device: None,
         audio_channels: None,

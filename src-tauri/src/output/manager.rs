@@ -135,6 +135,42 @@ impl OutputManager {
                 );
                 Ok(None)
             }
+            OutputType::Syphon => {
+                // Syphon出力はパイプラインで処理（macOSのみ）
+                debug!(
+                    "[OutputManager] Creating Syphon output '{}' (syphon-name='{}')",
+                    config.name,
+                    config.syphon_name.as_deref().unwrap_or("TauriLivePlayer")
+                );
+                self.outputs.insert(
+                    config.id.clone(),
+                    OutputWindowState {
+                        id: config.id.clone(),
+                        output_type: OutputType::Syphon,
+                        native_handle: None,
+                        monitor_index: None,
+                    },
+                );
+                Ok(None)
+            }
+            OutputType::Spout => {
+                // Spout出力はパイプラインで処理（Windowsのみ）
+                debug!(
+                    "[OutputManager] Creating Spout output '{}' (spout-name='{}')",
+                    config.name,
+                    config.spout_name.as_deref().unwrap_or("TauriLivePlayer")
+                );
+                self.outputs.insert(
+                    config.id.clone(),
+                    OutputWindowState {
+                        id: config.id.clone(),
+                        output_type: OutputType::Spout,
+                        native_handle: None,
+                        monitor_index: None,
+                    },
+                );
+                Ok(None)
+            }
         }
     }
 

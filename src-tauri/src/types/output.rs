@@ -32,6 +32,14 @@ pub struct OutputTarget {
     pub audio_device: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_channels: Option<Vec<u32>>,
+
+    // Syphon (macOS)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub syphon_name: Option<String>,
+
+    // Spout (Windows)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spout_name: Option<String>,
 }
 
 /// 出力タイプ
@@ -41,6 +49,10 @@ pub enum OutputType {
     Display,
     Ndi,
     Audio,
+    /// macOS: Syphon GPU texture sharing
+    Syphon,
+    /// Windows: Spout GPU texture sharing
+    Spout,
 }
 
 /// オーディオドライバ
