@@ -26,6 +26,12 @@ pub enum AppError {
     #[error("NDI error: {0}")]
     Ndi(String),
 
+    #[error("Syphon error: {0}")]
+    Syphon(String),
+
+    #[error("Spout error: {0}")]
+    Spout(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

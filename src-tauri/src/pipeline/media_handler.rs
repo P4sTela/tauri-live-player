@@ -124,13 +124,30 @@ fn handle_video_pad(
         }
     };
 
-    // NDI出力の場合
-    let is_ndi = owm.output.output_type == OutputType::Ndi;
-
-    if is_ndi {
-        handle_ndi_video(pipeline, src_pad, owm, &convert, &balance, appsink_weak);
-    } else {
-        handle_display_video(pipeline, src_pad, owm, &convert, &balance);
+    // 出力タイプに応じたパイプライン構築
+    match owm.output.output_type {
+        OutputType::Ndi => {
+            handle_ndi_video(pipeline, src_pad, owm, &convert, &balance, appsink_weak);
+        }
+        OutputType::Syphon => {
+            #[cfg(target_os = "macos")]
+            handle_syphon_video(pipeline, src_pad, owm, &convert, &balance, appsink_weak);
+            #[cfg(not(target_os = "macos"))]
+            error!("Syphon is only supported on macOS");
+        }
+        OutputType::Spout => {
+            #[cfg(windows)]
+            handle_spout_video(pipeline, src_pad, owm, &convert, &balance, appsink_weak);
+            #[cfg(not(windows))]
+            error!("Spout is only supported on Windows");
+        }
+        OutputType::Display => {
+            handle_display_video(pipeline, src_pad, owm, &convert, &balance);
+        }
+        OutputType::Audio => {
+            // Audio output doesn't have video, should not reach here
+            error!("Audio output type received video pad");
+        }
     }
 
     debug!(
@@ -230,6 +247,102 @@ fn handle_ndi_video(
 
     debug!(
         "[CuePlayer] NDI source linked to appsink for '{}'",
+        owm.output.name
+    );
+}
+
+/// Syphon出力用のビデオパイプライン構築 (macOS)
+#[cfg(target_os = "macos")]
+fn handle_syphon_video(
+    pipeline: &gst::Pipeline,
+    src_pad: &gst::Pad,
+    owm: &OutputWithMonitor,
+    convert: &gst::Element,
+    balance: &gst::Element,
+    appsink_weak: Option<&glib::WeakRef<gst_app::AppSink>>,
+) {
+    // appsinkベースのSyphonパイプライン:
+    // [ソース動画] → convert → balance → capsfilter(RGBA) → appsink → SyphonSender
+
+    let appsink = match appsink_weak.and_then(|w| w.upgrade()) {
+        Some(a) => a,
+        None => {
+            error!("Failed to get appsink for Syphon output");
+            return;
+        }
+    };
+
+    // Syphon用にRGBAフォーマットに変換するcapsfilter
+    let capsfilter = match gst::ElementFactory::make("capsfilter")
+        .property(
+            "caps",
+            gst::Caps::builder("video/x-raw")
+                .field("format", "RGBA")
+                .build(),
+        )
+        .build()
+    {
+        Ok(e) => e,
+        Err(e) => {
+            error!("Failed to create capsfilter for Syphon: {:?}", e);
+            return;
+        }
+    };
+
+    if let Err(e) = pipeline.add_many([convert, balance, &capsfilter]) {
+        error!("Failed to add video elements to pipeline: {:?}", e);
+        return;
+    }
+
+    // convert → balance → capsfilter をリンク
+    if let Err(e) = gst::Element::link_many([convert, balance, &capsfilter]) {
+        error!("Failed to link convert to balance to capsfilter: {:?}", e);
+        return;
+    }
+
+    // capsfilter → appsink をリンク
+    let capsfilter_src = match capsfilter.static_pad("src") {
+        Some(p) => p,
+        None => {
+            error!("Failed to get src pad from capsfilter");
+            return;
+        }
+    };
+
+    let appsink_sink = match appsink.static_pad("sink") {
+        Some(p) => p,
+        None => {
+            error!("Failed to get sink pad from appsink");
+            return;
+        }
+    };
+
+    if let Err(e) = capsfilter_src.link(&appsink_sink) {
+        error!("Failed to link capsfilter to appsink: {:?}", e);
+        return;
+    }
+
+    // デコーダからconvertへリンク
+    let sink_pad = match convert.static_pad("sink") {
+        Some(p) => p,
+        None => {
+            error!("Failed to get sink pad from videoconvert");
+            return;
+        }
+    };
+
+    if let Err(e) = src_pad.link(&sink_pad) {
+        error!("Failed to link src pad to sink pad: {:?}", e);
+        return;
+    }
+
+    // 状態同期
+    let _ = convert.sync_state_with_parent();
+    let _ = balance.sync_state_with_parent();
+    let _ = capsfilter.sync_state_with_parent();
+
+    debug!(
+        "[CuePlayer] Syphon source linked to appsink for '{}'",
         owm.output.name
     );
 }
@@ -467,6 +580,12 @@ pub fn create_video_sink(owm: &OutputWithMonitor) -> Result<gst::Element, gst::g
         }
         OutputType::Audio => Err(gst::glib::bool_error!(
             "Audio output cannot be used as video sink"
+        )),
+        OutputType::Syphon => Err(gst::glib::bool_error!(
+            "Syphon output uses appsink, not video sink"
+        )),
+        OutputType::Spout => Err(gst::glib::bool_error!(
+            "Spout output uses appsink, not video sink"
         )),
     }
 }

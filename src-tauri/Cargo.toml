@@ -47,6 +47,7 @@ gstreamer-video = "0.23"
 gstreamer-audio = "0.23"
 gstreamer-app = "0.23"
 gstreamer-pbutils = "0.23"
+gstreamer-gl = "0.23"
 
 # NDI SDK (appsink方式での送信用)
 grafton-ndi = { version = "0.9", features = ["advanced_sdk"] }
@@ -55,7 +56,11 @@ grafton-ndi = { version = "0.9", features = ["advanced_sdk"] }
 # Windows-specific dependencies (if needed)
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# macOS-specific dependencies (if needed)
+# Syphon - use same objc2 version as Tauri (0.6.x)
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-metal = "0.3"
+block2 = "0.6"
 
 [features]
 default = ["custom-protocol"]

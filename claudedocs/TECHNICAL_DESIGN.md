@@ -19,13 +19,13 @@
 
 **重要**: NDI 出力には `ndisink` を使用せず、`appsink` + NDI SDK 直接呼び出しを採用する。
 
-| 出力タイプ | 方式 | 理由 |
-|-----------|------|------|
-| Display | GStreamer シンク | 安定、シンプル |
-| Audio | GStreamer シンク (ASIO等) | 低レイテンシ |
-| **NDI** | **appsink + NDI SDK** | ライブ/非ライブ混在問題を回避 |
-| **Syphon** | **appsink (GL) + Syphon Framework** | macOS、GPU直接共有 |
-| **Spout** | **appsink (D3D11) + Spout SDK** | Windows、GPU直接共有 |
+| 出力タイプ | 方式 | 理由 | 状態 |
+|-----------|------|------|------|
+| Display | GStreamer シンク | 安定、シンプル | ✅ |
+| Audio | GStreamer シンク (ASIO等) | 低レイテンシ | ✅ |
+| **NDI** | **appsink + NDI SDK** | ライブ/非ライブ混在問題を回避 | ✅ |
+| **Syphon** | **appsink (RGBA) + objc2 FFI** | macOS、GPU直接共有 | ✅ |
+| **Spout** | **appsink (D3D11) + Spout SDK** | Windows、GPU直接共有 | 未実装 |
 
 ### なぜ appsink + NDI SDK か
 

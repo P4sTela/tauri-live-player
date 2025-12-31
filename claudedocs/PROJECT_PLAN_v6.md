@@ -467,7 +467,7 @@ impl PlayerPipeline {
 
 ---
 
-### Phase 4c: Syphon / Spout（1週間）※必要時
+### Phase 4c: Syphon / Spout（1週間）※Syphon完了
 
 同一PC内での映像共有。TouchDesigner / Resolume / VDMX 等との連携に使用。
 
@@ -479,29 +479,51 @@ impl PlayerPipeline {
 | 仕組み | IOSurface (GPU共有) | DirectX テクスチャ共有 |
 | レイテンシ | ほぼ0（GPU直接） | ほぼ0（GPU直接） |
 | 範囲 | 同一PC内のみ | 同一PC内のみ |
+| **状態** | **✅ 完了** | 未実装 |
 
 #### アーキテクチャ
 
 ```
-macOS:  filesrc → decode → glupload → glcolorconvert → appsink
-                                                          ↓
-                                                   SyphonServer (FFI)
+macOS:  filesrc → decode → videoconvert → videobalance → appsink (RGBA)
+                                                            ↓
+                                                   SyphonSender (objc2 FFI)
+                                                            ↓
+                                                   SyphonServer → 他アプリ
 
 Windows: filesrc → decode → d3d11upload → d3d11convert → appsink
                                                           ↓
-                                                   SpoutSender (FFI)
+                                                   SpoutSender (C FFI)
 ```
 
-#### 実装内容
-- Syphon Framework FFI (macOS)
-- Spout SDK FFI (Windows)
-- GPU テクスチャハンドル取得
-- appsink から GL/D3D11 メモリ抽出
+#### Syphon実装詳細 (2024-12-30 完了)
+
+**採用技術:**
+- `objc2` v0.6 (Tauriと同じバージョン)
+- `objc2-foundation` v0.3
+- CGL (Core OpenGL) で独自GLコンテキスト作成
+- NSBundle経由でSyphon.frameworkを動的ロード
+
+**主要ファイル:**
+- `src-tauri/src/pipeline/syphon_sender.rs` - SyphonSender実装
+- `src-tauri/src/types/output.rs` - OutputType::Syphon追加
+
+**動作フロー:**
+1. アプリ起動時にSyphon.frameworkをNSBundleでロード
+2. CuePlayer.load_cue()でSyphon出力のsetup
+3. 独自CGLコンテキスト作成 + SyphonServer初期化
+4. appsinkコールバックでRGBAフレーム受信
+5. OpenGLテクスチャ作成→SyphonServerでpublish
+6. 他アプリ(TouchDesigner等)でSyphonソースとして受信可能
+
+**注意:**
+- Syphon.frameworkはarm64対応のユニバーサルビルドが必要
+- `/Library/Frameworks/Syphon.framework` にインストール
+- Syphon SDK 5からソースビルド: `xcodebuild -project Syphon.xcodeproj -target Syphon ARCHS="x86_64 arm64"`
 
 #### 成果物
-- [ ] SyphonServer 実装 (macOS)
+- [x] SyphonServer 実装 (macOS) ✅
 - [ ] SpoutSender 実装 (Windows)
-- [ ] 出力先選択UI
+- [x] 出力先選択UI ✅
 
 #### 参考
 - [Syphon](http://syphon.v002.info/)
@@ -557,7 +579,7 @@ gst-launch-1.0 compositor name=c \
 | M3 | マルチ出力動作 | 7週目 |
 | M4a | NDI送受信動作 | 9週目 |
 | M4b | NDI\|HX動作（必要時） | 11週目 |
-| M4c | Syphon/Spout動作（必要時） | 12週目 |
+| M4c | Syphon/Spout動作（Syphon✅完了） | 12週目 |
 | M5 | マルチスクリーン動作 | 14週目 |
 | M6 | TCチェイス動作 | 16週目 |
 | M7 | リリースビルド完成 | 17週目 |
