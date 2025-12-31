@@ -57,6 +57,8 @@ fn ensure_syphon_loaded() -> bool {
     SYPHON_LOADED.load(Ordering::SeqCst)
 }
 
+/// SAFETY: This function uses Objective-C runtime to dynamically load Syphon.framework
+/// Caller must ensure this is only called once via SYPHON_INIT (enforced by ensure_syphon_loaded)
 unsafe fn load_syphon_framework() -> bool {
     let path = NSString::from_str("/Library/Frameworks/Syphon.framework");
     let bundle = NSBundle::bundleWithPath(&path);
@@ -94,6 +96,9 @@ unsafe impl Sync for GLContext {}
 
 impl GLContext {
     fn new() -> Option<Self> {
+        // SAFETY: Calling CGL (Core OpenGL) C APIs to create an OpenGL context
+        // for background thread rendering. All CGL functions are properly declared
+        // in the extern block and we check return codes for errors.
         unsafe {
             let attributes: [i32; 8] = [
                 K_CGL_PFA_ACCELERATED,
@@ -139,16 +144,19 @@ impl GLContext {
     }
 
     fn lock(&self) -> bool {
+        // SAFETY: Locking valid CGL context created in new()
         unsafe { CGLLockContext(self.context) == 0 }
     }
 
     fn unlock(&self) {
+        // SAFETY: Unlocking valid CGL context created in new()
         unsafe {
             CGLUnlockContext(self.context);
         }
     }
 
     fn make_current(&self) -> bool {
+        // SAFETY: Setting valid CGL context as current for this thread
         unsafe { CGLSetCurrentContext(self.context) == 0 }
     }
 
@@ -159,6 +167,8 @@ impl GLContext {
 
 impl Drop for GLContext {
     fn drop(&mut self) {
+        // SAFETY: Destroying CGL resources that were created in new()
+        // context and pixel_format are valid until drop is called
         unsafe {
             CGLDestroyContext(self.context);
             CGLDestroyPixelFormat(self.pixel_format);
@@ -183,10 +193,12 @@ impl SyphonOpenGLServer {
         }
 
         unsafe {
-            // Get SyphonServer class
+            // SAFETY: Getting SyphonServer class from loaded framework
+            // The framework is guaranteed to be loaded by ensure_syphon_loaded() check above
             let class = AnyClass::get(c"SyphonServer")?;
 
-            // Allocate
+            // SAFETY: Allocating SyphonServer instance via Objective-C runtime
+            // We must release this object if initialization fails to prevent leak
             let obj: *mut AnyObject = msg_send![class, alloc];
             if obj.is_null() {
                 error!("[SyphonOpenGLServer] Failed to allocate");
@@ -196,7 +208,9 @@ impl SyphonOpenGLServer {
             // Create NSString for name
             let ns_name = NSString::from_str(name);
 
-            // initWithName:context:options:
+            // SAFETY: Calling initWithName:context:options: on allocated SyphonServer
+            // cgl_context is a valid CGL context created by GLContext
+            // If init fails, we must release the allocated object
             let server: *mut AnyObject = msg_send![
                 obj,
                 initWithName: &*ns_name,
@@ -206,10 +220,13 @@ impl SyphonOpenGLServer {
 
             if server.is_null() {
                 error!("[SyphonOpenGLServer] initWithName failed");
+                // Release the allocated object to prevent leak
+                let _: () = msg_send![obj, release];
                 return None;
             }
 
-            // Convert to Retained
+            // SAFETY: Converting raw pointer to Retained
+            // server is non-null and properly initialized
             let retained = Retained::from_raw(server)?;
             info!("[SyphonOpenGLServer] Created server: {}", name);
             Some(Self { server: retained })
@@ -224,6 +241,8 @@ impl SyphonOpenGLServer {
         height: i32,
         flipped: bool,
     ) {
+        // SAFETY: Calling Syphon's publishFrameTexture method on valid SyphonServer
+        // texture_id is a valid OpenGL texture created and bound in the current GL context
         unsafe {
             // Use NSRect/NSSize from objc2_foundation
             let region = NSRect {
@@ -258,6 +277,7 @@ impl SyphonOpenGLServer {
     }
 
     fn stop(&self) {
+        // SAFETY: Calling stop method on valid SyphonServer to halt frame publishing
         unsafe {
             let _: () = msg_send![&*self.server, stop];
         }
@@ -337,6 +357,7 @@ impl SyphonState {
 
         // Create texture
         let mut texture_id: u32 = 0;
+        // SAFETY: Calling OpenGL glGenTextures with valid GL context set as current
         unsafe {
             glGenTextures(1, &mut texture_id);
         }
@@ -367,6 +388,8 @@ impl SyphonState {
             return;
         }
 
+        // SAFETY: Calling OpenGL functions to upload frame data to texture
+        // GL context is locked and set as current, texture_id is valid, data slice is valid RGBA buffer
         unsafe {
             glBindTexture(GL_TEXTURE_2D, self.texture_id);
 
@@ -420,6 +443,8 @@ impl Drop for SyphonState {
     fn drop(&mut self) {
         if self.gl_context.lock() {
             if self.gl_context.make_current() {
+                // SAFETY: Deleting OpenGL texture that was created in new()
+                // GL context is locked and current, texture_id is valid
                 unsafe {
                     glDeleteTextures(1, &self.texture_id);
                 }
@@ -434,6 +459,8 @@ pub struct SyphonSender {
     name: String,
     state: Arc<Mutex<Option<SyphonState>>>,
     last_pts_ns: Arc<AtomicU64>,
+    /// appsink reference to keep it alive while SyphonSender exists
+    /// This ensures the appsink callbacks remain valid
     #[allow(dead_code)]
     appsink: Option<gst_app::AppSink>,
 }
@@ -548,10 +575,6 @@ impl SyphonSender {
     pub fn last_position(&self) -> f64 {
         let ns = self.last_pts_ns.load(Ordering::Relaxed);
         ns as f64 / 1_000_000_000.0
-    }
-
-    pub fn has_clients(&self) -> bool {
-        false
     }
 
     pub fn name(&self) -> &str {
